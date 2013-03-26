@@ -1,39 +1,30 @@
 from __future__ import absolute_import
-from __future__ import with_statement
 
 from mock import Mock
 
-from celery.worker import abstract
+from celery import bootsteps
 
 from celery.tests.utils import AppCase, Case
 
 
-class test_Component(Case):
+class test_Step(Case):
 
-    class Def(abstract.Component):
-        name = "test_Component.Def"
+    class Def(bootsteps.StartStopStep):
+        name = 'test_Step.Def'
 
-    def test_components_must_be_named(self):
-        with self.assertRaises(NotImplementedError):
+    def setUp(self):
+        self.steps = []
 
-            class X(abstract.Component):
-                pass
+    def test_namespace_name(self, ns='test_namespace_name'):
 
-        class Y(abstract.Component):
-            abstract = True
-
-    def test_namespace_name(self, ns="test_namespace_name"):
-
-        class X(abstract.Component):
+        class X(bootsteps.Step):
             namespace = ns
-            name = "X"
-        self.assertEqual(X.namespace, ns)
-        self.assertEqual(X.name, "X")
+            name = 'X'
+        self.assertEqual(X.name, 'X')
 
-        class Y(abstract.Component):
-            name = "%s.Y" % (ns, )
-        self.assertEqual(Y.namespace, ns)
-        self.assertEqual(Y.name, "Y")
+        class Y(bootsteps.Step):
+            name = '%s.Y' % ns
+        self.assertEqual(Y.name, '%s.Y' % ns)
 
     def test_init(self):
         self.assertTrue(self.Def(self))
@@ -56,10 +47,10 @@ class test_Component(Case):
     def test_include_when_enabled(self):
         x = self.Def(self)
         x.create = Mock()
-        x.create.return_value = "George"
+        x.create.return_value = 'George'
         self.assertTrue(x.include(self))
 
-        self.assertEqual(x.obj, "George")
+        self.assertEqual(x.obj, 'George')
         x.create.assert_called_with(self)
 
     def test_include_when_disabled(self):
@@ -71,13 +62,13 @@ class test_Component(Case):
         self.assertFalse(x.create.call_count)
 
 
-class test_StartStopComponent(Case):
+class test_StartStopStep(Case):
 
-    class Def(abstract.StartStopComponent):
-        name = "test_StartStopComponent.Def"
+    class Def(bootsteps.StartStopStep):
+        name = 'test_StartStopStep.Def'
 
     def setUp(self):
-        self.components = []
+        self.steps = []
 
     def test_start__stop(self):
         x = self.Def(self)
@@ -85,140 +76,99 @@ class test_StartStopComponent(Case):
 
         # include creates the underlying object and sets
         # its x.obj attribute to it, as well as appending
-        # it to the parent.components list.
+        # it to the parent.steps list.
         x.include(self)
-        self.assertTrue(self.components)
-        self.assertIs(self.components[0], x.obj)
+        self.assertTrue(self.steps)
+        self.assertIs(self.steps[0], x)
 
-        x.start()
+        x.start(self)
         x.obj.start.assert_called_with()
 
-        x.stop()
+        x.stop(self)
         x.obj.stop.assert_called_with()
 
     def test_include_when_disabled(self):
         x = self.Def(self)
         x.enabled = False
         x.include(self)
-        self.assertFalse(self.components)
+        self.assertFalse(self.steps)
 
-    def test_terminate_when_terminable(self):
-        x = self.Def(self)
-        x.terminable = True
-        x.create = Mock()
-
-        x.include(self)
-        x.terminate()
-        x.obj.terminate.assert_called_with()
-        self.assertFalse(x.obj.stop.call_count)
-
-    def test_terminate_calls_stop_when_not_terminable(self):
+    def test_terminate(self):
         x = self.Def(self)
         x.terminable = False
         x.create = Mock()
 
         x.include(self)
-        x.terminate()
+        x.terminate(self)
         x.obj.stop.assert_called_with()
-        self.assertFalse(x.obj.terminate.call_count)
 
 
 class test_Namespace(AppCase):
 
-    class NS(abstract.Namespace):
-        name = "test_Namespace"
+    class NS(bootsteps.Namespace):
+        name = 'test_Namespace'
 
-    class ImportingNS(abstract.Namespace):
+    def test_steps_added_to_unclaimed(self):
 
-        def __init__(self, *args, **kwargs):
-            abstract.Namespace.__init__(self, *args, **kwargs)
-            self.imported = []
+        class tnA(bootsteps.Step):
+            name = 'test_Namespace.A'
 
-        def modules(self):
-            return ["A", "B", "C"]
+        class tnB(bootsteps.Step):
+            name = 'test_Namespace.B'
 
-        def import_module(self, module):
-            self.imported.append(module)
+        class xxA(bootsteps.Step):
+            name = 'xx.A'
 
-    def test_components_added_to_unclaimed(self):
+        class NS(self.NS):
+            default_steps = [tnA, tnB]
+        ns = NS(app=self.app)
 
-        class tnA(abstract.Component):
-            name = "test_Namespace.A"
-
-        class tnB(abstract.Component):
-            name = "test_Namespace.B"
-
-        class xxA(abstract.Component):
-            name = "xx.A"
-
-        self.assertIn("A", self.NS._unclaimed["test_Namespace"])
-        self.assertIn("B", self.NS._unclaimed["test_Namespace"])
-        self.assertIn("A", self.NS._unclaimed["xx"])
-        self.assertNotIn("B", self.NS._unclaimed["xx"])
+        self.assertIn(tnA, ns._all_steps())
+        self.assertIn(tnB, ns._all_steps())
+        self.assertNotIn(xxA, ns._all_steps())
 
     def test_init(self):
         ns = self.NS(app=self.app)
         self.assertIs(ns.app, self.app)
-        self.assertEqual(ns.name, "test_Namespace")
-        self.assertFalse(ns.services)
-
-    def test_interface_modules(self):
-        self.NS(app=self.app).modules()
-
-    def test_load_modules(self):
-        x = self.ImportingNS(app=self.app)
-        x.load_modules()
-        self.assertListEqual(x.imported, ["A", "B", "C"])
+        self.assertEqual(ns.name, 'test_Namespace')
 
     def test_apply(self):
 
-        class MyNS(abstract.Namespace):
-            name = "test_apply"
+        class MyNS(bootsteps.Namespace):
+            name = 'test_apply'
 
             def modules(self):
-                return ["A", "B"]
+                return ['A', 'B']
 
-        class A(abstract.Component):
-            name = "test_apply.A"
-            requires = ["C"]
+        class B(bootsteps.Step):
+            name = 'test_apply.B'
 
-        class B(abstract.Component):
-            name = "test_apply.B"
+        class C(bootsteps.Step):
+            name = 'test_apply.C'
+            requires = [B]
 
-        class C(abstract.Component):
-            name = "test_apply.C"
-            requires = ["B"]
+        class A(bootsteps.Step):
+            name = 'test_apply.A'
+            requires = [C]
 
-        class D(abstract.Component):
-            name = "test_apply.D"
+        class D(bootsteps.Step):
+            name = 'test_apply.D'
             last = True
 
-        x = MyNS(app=self.app)
-        x.import_module = Mock()
+        x = MyNS([A, D], app=self.app)
         x.apply(self)
 
-        self.assertItemsEqual(x.components.values(), [A, B, C, D])
-        self.assertTrue(x.import_module.call_count)
+        self.assertIsInstance(x.order[0], B)
+        self.assertIsInstance(x.order[1], C)
+        self.assertIsInstance(x.order[2], A)
+        self.assertIsInstance(x.order[3], D)
+        self.assertIn(A, x.types)
+        self.assertIs(x[A.name], x.order[2])
 
-        for boot_step in x.boot_steps:
-            self.assertEqual(boot_step.namespace, x)
+    def test_find_last_but_no_steps(self):
 
-        self.assertIsInstance(x.boot_steps[0], B)
-        self.assertIsInstance(x.boot_steps[1], C)
-        self.assertIsInstance(x.boot_steps[2], A)
-        self.assertIsInstance(x.boot_steps[3], D)
-
-        self.assertIs(x["A"], A)
-
-    def test_import_module(self):
-        x = self.NS(app=self.app)
-        import os
-        self.assertIs(x.import_module("os"), os)
-
-    def test_find_last_but_no_components(self):
-
-        class MyNS(abstract.Namespace):
-            name = "qwejwioqjewoqiej"
+        class MyNS(bootsteps.Namespace):
+            name = 'qwejwioqjewoqiej'
 
         x = MyNS(app=self.app)
         x.apply(self)

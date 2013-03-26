@@ -2,20 +2,18 @@ from __future__ import absolute_import
 
 import sys
 
-from Queue import Queue
-
 from mock import Mock, patch
 
-from celery.utils import uuid
+from celery.five import Queue
 from celery.worker.mediator import Mediator
 from celery.worker.state import revoked as revoked_tasks
 from celery.tests.utils import Case
 
 
 class MockTask(object):
-    hostname = "harness.com"
+    hostname = 'harness.com'
     id = 1234
-    name = "mocktask"
+    name = 'mocktask'
 
     def __init__(self, value, **kwargs):
         self.value = value
@@ -47,21 +45,21 @@ class test_Mediator(Case):
         got = {}
 
         def mycallback(value):
-            got["value"] = value.value
+            got['value'] = value.value
 
         m = Mediator(ready_queue, mycallback)
-        ready_queue.put(MockTask("George Costanza"))
+        ready_queue.put(MockTask('George Costanza'))
 
         m.body()
 
-        self.assertEqual(got["value"], "George Costanza")
+        self.assertEqual(got['value'], 'George Costanza')
 
-        ready_queue.put(MockTask("Jerry Seinfeld"))
+        ready_queue.put(MockTask('Jerry Seinfeld'))
         m._does_debug = False
         m.body()
-        self.assertEqual(got["value"], "Jerry Seinfeld")
+        self.assertEqual(got['value'], 'Jerry Seinfeld')
 
-    @patch("os._exit")
+    @patch('os._exit')
     def test_mediator_crash(self, _exit):
         ms = [None]
 
@@ -69,13 +67,13 @@ class test_Mediator(Case):
 
             def body(self):
                 try:
-                    raise KeyError("foo")
+                    raise KeyError('foo')
                 finally:
                     ms[0]._is_shutdown.set()
 
         ready_queue = Queue()
         ms[0] = m = _Mediator(ready_queue, None)
-        ready_queue.put(MockTask("George Constanza"))
+        ready_queue.put(MockTask('George Constanza'))
 
         stderr = Mock()
         p, sys.stderr = sys.stderr, stderr
@@ -90,10 +88,10 @@ class test_Mediator(Case):
         ready_queue = Queue()
 
         def mycallback(value):
-            raise KeyError("foo")
+            raise KeyError('foo')
 
         m = Mediator(ready_queue, mycallback)
-        ready_queue.put(MockTask("Elaine M. Benes"))
+        ready_queue.put(MockTask('Elaine M. Benes'))
 
         m.body()
 
@@ -107,26 +105,8 @@ class test_Mediator(Case):
 
         m = Mediator(ready_queue, mycallback)
         condition[0] = m._is_shutdown
-        ready_queue.put(MockTask("Elaine M. Benes"))
+        ready_queue.put(MockTask('Elaine M. Benes'))
 
         m.run()
         self.assertTrue(m._is_shutdown.isSet())
         self.assertTrue(m._is_stopped.isSet())
-
-    def test_mediator_body_revoked(self):
-        ready_queue = Queue()
-        got = {}
-
-        def mycallback(value):
-            got["value"] = value.value
-
-        m = Mediator(ready_queue, mycallback)
-        t = MockTask("Jerry Seinfeld")
-        t.id = uuid()
-        revoked_tasks.add(t.id)
-        ready_queue.put(t)
-
-        m.body()
-
-        self.assertNotIn("value", got)
-        self.assertTrue(t.on_ack.call_count)

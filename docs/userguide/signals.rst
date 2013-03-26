@@ -4,7 +4,6 @@
 Signals
 =======
 
-
 .. contents::
     :local:
 
@@ -30,8 +29,8 @@ Example connecting to the :signal:`task_sent` signal:
 
     @task_sent.connect
     def task_sent_handler(sender=None, task_id=None, task=None, args=None,
-                          kwargs=None, \*\*kwds):
-        print("Got signal task_sent for task id %s" % (task_id, ))
+                          kwargs=None, **kwds):
+        print('Got signal task_sent for task id {0}'.format(task_id))
 
 
 Some signals also have a sender which you can filter by. For example the
@@ -42,10 +41,16 @@ has been sent by providing the `sender` argument to
 
 .. code-block:: python
 
-    @task_sent.connect(task_sent_handler, sender="tasks.add")
+    @task_sent.connect(sender='tasks.add')
     def task_sent_handler(sender=None, task_id=None, task=None, args=None,
-                          kwargs=None, \*\*kwds):
-        print("Got signal task_sent for task id %s" % (task_id, ))
+                          kwargs=None, **kwds):
+        print('Got signal task_sent for task id {0}'.format(task_id)
+
+Signals use the same implementation as django.core.dispatch. As a result other
+keyword parameters (e.g. signal) are passed to all signal handlers by default.
+
+The best practice for signal handlers is to accept arbitrary keyword arguments (i.e. **kwargs).
+That way new celery versions can add additional arguments without breaking user code.
 
 .. _signal-ref:
 
@@ -135,6 +140,10 @@ Provides arguments:
 * retval
     The return value of the task.
 
+* state
+
+    Name of the resulting state.
+
 .. signal:: task_success
 
 task_success
@@ -178,15 +187,73 @@ Provides arguments:
 * einfo
     The :class:`celery.datastructures.ExceptionInfo` instance.
 
+.. signal:: task_revoked
+
+task_revoked
+~~~~~~~~~~~~
+
+Dispatched when a task is revoked/terminated by the worker.
+
+Sender is the task class revoked/terminated.
+
+Provides arguments:
+
+* terminated
+    Set to :const:`True` if the task was terminated.
+
+* signum
+    Signal number used to terminate the task. If this is :const:`None` and
+    terminated is :const:`True` then :sig:`TERM` should be assumed.
+
+* expired
+  Set to :const:`True` if the task expired.
+
 Worker Signals
 --------------
+
+.. signal:: celeryd_after_setup
+
+celeryd_after_setup
+~~~~~~~~~~~~~~~~~~~
+
+This signal is sent after the worker instance is set up,
+but before it calls run.  This means that any queues from the :option:`-Q`
+option is enabled, logging has been set up and so on.
+
+It can be used to e.g. add custom queues that should always be consumed
+from, disregarding the :option:`-Q` option.  Here's an example
+that sets up a direct queue for each worker, these queues can then be
+used to route a task to any specific worker:
+
+.. code-block:: python
+
+    from celery.signals import celeryd_after_setup
+
+    @celeryd_after_setup.connect
+    def setup_direct_queue(sender, instance, **kwargs):
+        queue_name = '{0}.dq'.format(sender)  # sender is the hostname of the worker
+        instance.app.amqp.queues.select_add(queue_name)
+
+Provides arguments:
+
+* sender
+  Hostname of the worker.
+
+* instance
+    This is the :class:`celery.apps.worker.Worker` instance to be initialized.
+    Note that only the :attr:`app` and :attr:`hostname` attributes have been
+    set so far, and the rest of ``__init__`` has not been executed.
+
+* conf
+    The configuration of the current app.
+
 
 .. signal:: celeryd_init
 
 celeryd_init
 ~~~~~~~~~~~~
 
-This is the first signal sent when :program:`celeryd` starts up.
+This is the first signal sent when :program:`celery worker` starts up.
 The ``sender`` is the host name of the worker, so this signal can be used
 to setup worker specific configuration:
 
@@ -194,9 +261,9 @@ to setup worker specific configuration:
 
     from celery.signals import celeryd_init
 
-    @celeryd_init.connect(sender="worker12.example.com")
+    @celeryd_init.connect(sender='worker12.example.com')
     def configure_worker12(conf=None, **kwargs):
-        conf.CELERY_DEFAULT_RATE_LIMIT = "10/m"
+        conf.CELERY_DEFAULT_RATE_LIMIT = '10/m'
 
 or to set up configuration for multiple workers you can omit specifying a
 sender when you connect:
@@ -207,12 +274,15 @@ sender when you connect:
 
     @celeryd_init.connect
     def configure_workers(sender=None, conf=None, **kwargs):
-        if sender in ("worker1.example.com", "worker2.example.com"):
-            conf.CELERY_DEFAULT_RATE_LIMIT = "10/m"
-        if sender == "worker3.example.com":
+        if sender in ('worker1.example.com', 'worker2.example.com'):
+            conf.CELERY_DEFAULT_RATE_LIMIT = '10/m'
+        if sender == 'worker3.example.com':
             conf.CELERYD_PREFETCH_MULTIPLIER = 0
 
 Provides arguments:
+
+* sender
+  Hostname of the worker.
 
 * instance
     This is the :class:`celery.apps.worker.Worker` instance to be initialized.
@@ -250,15 +320,15 @@ worker_shutdown
 
 Dispatched when the worker is about to shut down.
 
-Celerybeat Signals
-------------------
+Beat Signals
+------------
 
 .. signal:: beat_init
 
 beat_init
 ~~~~~~~~~
 
-Dispatched when celerybeat starts (either standalone or embedded).
+Dispatched when :program:`celery beat` starts (either standalone or embedded).
 Sender is the :class:`celery.beat.Service` instance.
 
 .. signal:: beat_embedded_init
@@ -266,8 +336,8 @@ Sender is the :class:`celery.beat.Service` instance.
 beat_embedded_init
 ~~~~~~~~~~~~~~~~~~
 
-Dispatched in addition to the :signal:`beat_init` signal when celerybeat is
-started as an embedded process.  Sender is the
+Dispatched in addition to the :signal:`beat_init` signal when :program:`celery
+beat` is started as an embedded process.  Sender is the
 :class:`celery.beat.Service` instance.
 
 Eventlet Signals

@@ -3,21 +3,19 @@
     celery.routes
     ~~~~~~~~~~~~~
 
-    Contains utilities for working with task routes
+    Contains utilities for working with task routers,
     (:setting:`CELERY_ROUTES`).
-
-    :copyright: (c) 2009 - 2012 by Ask Solem.
-    :license: BSD, see LICENSE for more details.
 
 """
 from __future__ import absolute_import
 
 from celery.exceptions import QueueNotFound
+from celery.five import string_t
 from celery.utils import lpmerge
 from celery.utils.functional import firstmethod, mpromise
 from celery.utils.imports import instantiate
 
-_first_route = firstmethod("route_for_task")
+_first_route = firstmethod('route_for_task')
 
 
 class MapRoute(object):
@@ -34,10 +32,9 @@ class MapRoute(object):
 
 class Router(object):
 
-    def __init__(self, routes=None, queues=None, create_missing=False,
-            app=None):
-        from . import app_or_default
-        self.app = app_or_default(app)
+    def __init__(self, routes=None, queues=None,
+                 create_missing=False, app=None):
+        self.app = app
         self.queues = {} if queues is None else queues
         self.routes = [] if routes is None else routes
         self.create_missing = create_missing
@@ -48,34 +45,33 @@ class Router(object):
             route = self.lookup_route(task, args, kwargs)
             if route:  # expands 'queue' in route.
                 return lpmerge(self.expand_destination(route), options)
-        if "queue" not in options:
+        if 'queue' not in options:
             options = lpmerge(self.expand_destination(
                               self.app.conf.CELERY_DEFAULT_QUEUE), options)
         return options
 
     def expand_destination(self, route):
         # Route can be a queue name: convenient for direct exchanges.
-        if isinstance(route, basestring):
+        if isinstance(route, string_t):
             queue, route = route, {}
         else:
             # can use defaults from configured queue, but override specific
             # things (like the routing_key): great for topic exchanges.
-            queue = route.pop("queue", None)
+            queue = route.pop('queue', None)
 
-        if queue:  # expand config from configured queue.
+        if queue:
             try:
-                dest = self.queues[queue].as_dict()
+                Q = self.queues[queue]  # noqa
             except KeyError:
                 if not self.create_missing:
                     raise QueueNotFound(
-                        "Queue %r is not defined in CELERY_QUEUES" % queue)
-                for key in "exchange", "routing_key":
+                        'Queue {0!r} missing from CELERY_QUEUES'.format(queue))
+                for key in 'exchange', 'routing_key':
                     if route.get(key) is None:
                         route[key] = queue
-                dest = self.app.amqp.queues.add(queue, **route).as_dict()
+                Q = self.app.amqp.queues.add(queue, **route)
             # needs to be declared by publisher
-            dest["queue"] = queue
-            return lpmerge(dest, route)
+            route['queue'] = Q
         return route
 
     def lookup_route(self, task, args=None, kwargs=None):
@@ -88,7 +84,7 @@ def prepare(routes):
     def expand_route(route):
         if isinstance(route, dict):
             return MapRoute(route)
-        if isinstance(route, basestring):
+        if isinstance(route, string_t):
             return mpromise(instantiate, route)
         return route
 
@@ -96,4 +92,4 @@ def prepare(routes):
         return ()
     if not isinstance(routes, (list, tuple)):
         routes = (routes, )
-    return map(expand_route, routes)
+    return [expand_route(route) for route in routes]

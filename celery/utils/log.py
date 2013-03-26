@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
+"""
+    celery.utils.log
+    ~~~~~~~~~~~~~~~~
+
+    Logging utilities.
+
+"""
+from __future__ import absolute_import, print_function
 
 import logging
 import os
@@ -7,6 +14,7 @@ import sys
 import threading
 import traceback
 
+from contextlib import contextmanager
 from billiard import current_process, util as mputil
 from kombu.log import get_logger as _get_logger, LOG_LEVELS
 
@@ -14,9 +22,9 @@ from .encoding import safe_str, str_t
 from .term import colored
 
 _process_aware = False
-is_py3k = sys.version_info[0] == 3
+PY3 = sys.version_info[0] == 3
 
-MP_LOG = os.environ.get("MP_LOG", False)
+MP_LOG = os.environ.get('MP_LOG', False)
 
 
 # Sets up our logging hierarchy.
@@ -24,15 +32,22 @@ MP_LOG = os.environ.get("MP_LOG", False)
 # Every logger in the celery package inherits from the "celery"
 # logger, and every task logger inherits from the "celery.task"
 # logger.
-base_logger = logger = _get_logger("celery")
-mp_logger = _get_logger("multiprocessing")
+base_logger = logger = _get_logger('celery')
+mp_logger = _get_logger('multiprocessing')
 
-in_sighandler = False
+_in_sighandler = False
 
 
 def set_in_sighandler(value):
-    global in_sighandler
-    in_sighandler = value
+    global _in_sighandler
+    _in_sighandler = value
+
+
+@contextmanager
+def in_sighandler():
+    set_in_sighandler(True)
+    yield
+    set_in_sighandler(False)
 
 
 def get_logger(name):
@@ -40,7 +55,8 @@ def get_logger(name):
     if logging.root not in (l, l.parent) and l is not base_logger:
         l.parent = base_logger
     return l
-task_logger = get_logger("celery.task")
+task_logger = get_logger('celery.task')
+worker_logger = get_logger('celery.worker')
 
 
 def get_task_logger(name):
@@ -59,16 +75,18 @@ def mlevel(level):
 class ColorFormatter(logging.Formatter):
     #: Loglevel -> Color mapping.
     COLORS = colored().names
-    colors = {"DEBUG": COLORS["blue"], "WARNING": COLORS["yellow"],
-              "ERROR": COLORS["red"], "CRITICAL": COLORS["magenta"]}
+    colors = {'DEBUG': COLORS['blue'], 'WARNING': COLORS['yellow'],
+              'ERROR': COLORS['red'], 'CRITICAL': COLORS['magenta']}
 
     def __init__(self, fmt=None, use_color=True):
         logging.Formatter.__init__(self, fmt)
         self.use_color = use_color
 
     def formatException(self, ei):
+        if ei and not isinstance(ei, tuple):
+            ei = sys.exc_info()
         r = logging.Formatter.formatException(self, ei)
-        if isinstance(r, str) and not is_py3k:
+        if isinstance(r, str) and not PY3:
             return safe_str(r)
         return r
 
@@ -79,17 +97,17 @@ class ColorFormatter(logging.Formatter):
         if self.use_color and color:
             try:
                 record.msg = safe_str(str_t(color(record.msg)))
-            except Exception, exc:
-                record.msg = "<Unrepresentable %r: %r>" % (
-                        type(record.msg), exc)
+            except Exception as exc:
+                record.msg = '<Unrepresentable {0!r}: {1!r}>'.format(
+                    type(record.msg), exc)
                 record.exc_info = True
 
-        if not is_py3k and "processName" not in record.__dict__:
+        if not PY3 and 'processName' not in record.__dict__:
             # Very ugly, but have to make sure processName is supported
             # by foreign logger instances.
             # (processName is always supported by Python 2.7)
-            process_name = current_process and current_process()._name or ""
-            record.__dict__["processName"] = process_name
+            process_name = current_process and current_process()._name or ''
+            record.__dict__['processName'] = process_name
         return safe_str(logging.Formatter.format(self, record))
 
 
@@ -100,7 +118,7 @@ class LoggingProxy(object):
     :param loglevel: Loglevel to use when writing messages.
 
     """
-    mode = "w"
+    mode = 'w'
     name = None
     closed = False
     loglevel = logging.ERROR
@@ -135,13 +153,13 @@ class LoggingProxy(object):
 
             handler.handleError = WithSafeHandleError().handleError
 
-        return map(wrap_handler, self.logger.handlers)
+        return [wrap_handler(l) for l in self.logger.handlers]
 
     def write(self, data):
         """Write message to logging object."""
-        if in_sighandler:
-            return sys.__stderr__.write(safe_str(data))
-        if getattr(self._thread, "recurse_protection", False):
+        if _in_sighandler:
+            print(safe_str(data), file=sys.__stderr__)
+        if getattr(self._thread, 'recurse_protection', False):
             # Logger is logging back to this file, so stop recursing.
             return
         data = data.strip()
@@ -178,9 +196,6 @@ class LoggingProxy(object):
         """Always returns :const:`False`. Just here for file support."""
         return False
 
-    def fileno(self):
-        return None
-
 
 def ensure_process_aware_logger():
     """Make sure process name is recorded when loggers are used."""
@@ -206,11 +221,11 @@ def ensure_process_aware_logger():
 
 
 def get_multiprocessing_logger():
-    return mputil.get_logger() if mputil and MP_LOG else None
+    return mputil.get_logger() if mputil else None
 
 
 def reset_multiprocessing_logger():
-    if mputil and hasattr(mputil, "_logger"):
+    if mputil and hasattr(mputil, '_logger'):
         mputil._logger = None
 
 
@@ -226,8 +241,7 @@ def _patch_logger_class():
                 _signal_safe = True
 
                 def log(self, *args, **kwargs):
-                    if in_sighandler:
-                        sys.__stderr__.write("IN SIGHANDLER WON'T LOG")
+                    if _in_sighandler:
                         return
                     return OldLoggerClass.log(self, *args, **kwargs)
             logging.setLoggerClass(SigSafeLogger)

@@ -20,31 +20,32 @@ class test_Pickle(Case):
     def test_pickle_regular_exception(self):
         exc = None
         try:
-            raise RegularException("RegularException raised")
-        except RegularException, exc_:
+            raise RegularException('RegularException raised')
+        except RegularException as exc_:
             exc = exc_
 
-        pickled = pickle.dumps({"exception": exc})
+        pickled = pickle.dumps({'exception': exc})
         unpickled = pickle.loads(pickled)
-        exception = unpickled.get("exception")
+        exception = unpickled.get('exception')
         self.assertTrue(exception)
         self.assertIsInstance(exception, RegularException)
-        self.assertTupleEqual(exception.args, ("RegularException raised", ))
+        self.assertTupleEqual(exception.args, ('RegularException raised', ))
 
     def test_pickle_arg_override_exception(self):
 
         exc = None
         try:
-            raise ArgOverrideException("ArgOverrideException raised",
-                    status_code=100)
-        except ArgOverrideException, exc_:
+            raise ArgOverrideException(
+                'ArgOverrideException raised', status_code=100,
+            )
+        except ArgOverrideException as exc_:
             exc = exc_
 
-        pickled = pickle.dumps({"exception": exc})
+        pickled = pickle.dumps({'exception': exc})
         unpickled = pickle.loads(pickled)
-        exception = unpickled.get("exception")
+        exception = unpickled.get('exception')
         self.assertTrue(exception)
         self.assertIsInstance(exception, ArgOverrideException)
         self.assertTupleEqual(exception.args, (
-                              "ArgOverrideException raised", 100))
+                              'ArgOverrideException raised', 100))
         self.assertEqual(exception.status_code, 100)

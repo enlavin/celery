@@ -64,7 +64,7 @@ Naming
         Sometimes it makes sense to have a class mask as a function,
         and there is precedence for this in the stdlib (e.g.
         :class:`~contextlib.contextmanager`).  Celery examples include
-        :class:`~celery.task.sets.subtask`, :class:`~celery.task.chords.chord`,
+        :class:`~celery.subtask`, :class:`~celery.chord`,
         ``inspect``, :class:`~kombu.utils.functional.promise` and more..
 
 - Factory functions and methods must be `CamelCase` (excluding verbs):
@@ -91,7 +91,7 @@ as this means that they can be set by either instantiation or inheritance.
 
     class Producer(object):
         active = True
-        serializer = "json"
+        serializer = 'json'
 
         def __init__(self, serializer=None):
             self.serializer = serializer or self.serializer
@@ -104,13 +104,13 @@ A subclass can change the default value:
 .. code-block:: python
 
     TaskProducer(Producer):
-        serializer = "pickle"
+        serializer = 'pickle'
 
 and the value can be set at instantiation:
 
 .. code-block:: python
 
-    >>> producer = TaskProducer(serializer="msgpack")
+    >>> producer = TaskProducer(serializer='msgpack')
 
 Exceptions
 ~~~~~~~~~~
@@ -220,7 +220,7 @@ from a module in the project, this module could look something like this:
     from celery import Celery
 
     celery = Celery()
-    celery.config_from_object(BROKER_URL="amqp://")
+    celery.config_from_object(BROKER_URL='amqp://')
 
 
 Module Overview
@@ -259,10 +259,12 @@ Module Overview
 
 - celery.apps
 
-    Major user applications: ``celeryd``, and ``celerybeat``
+    Major user applications: worker and beat.
+    The command-line wrappers for these are in celery.bin (see below)
+
 - celery.bin
 
-    Command line applications.
+    Command-line applications.
     setup.py creates setuptools entrypoints for these.
 
 - celery.concurrency

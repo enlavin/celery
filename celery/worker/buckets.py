@@ -6,32 +6,75 @@
     This module implements the rate limiting of tasks,
     by having a token bucket queue for each task type.
     When a task is allowed to be processed it's moved
-    over the the ``ready_queue``
+    over the ``ready_queue``
 
     The :mod:`celery.worker.mediator` is then responsible
     for moving tasks from the ``ready_queue`` to the worker pool.
 
-    :copyright: (c) 2009 - 2012 by Ask Solem.
-    :license: BSD, see LICENSE for more details.
-
 """
 from __future__ import absolute_import
-from __future__ import with_statement
 
 import threading
 
 from collections import deque
+from itertools import chain
 from time import time, sleep
-from Queue import Queue, Empty
 
 from kombu.utils.limits import TokenBucket
 
+from celery.five import Queue, Empty, values, zip_longest
 from celery.utils import timeutils
-from celery.utils.compat import zip_longest, chain_from_iterable
 
 
 class RateLimitExceeded(Exception):
     """The token buckets rate limit has been exceeded."""
+
+
+class AsyncTaskBucket(object):
+
+    def __init__(self, task_registry, callback=None, worker=None):
+        self.task_registry = task_registry
+        self.callback = callback
+        self.worker = worker
+        self.buckets = {}
+        self.refresh()
+
+    def cont(self, request, bucket, tokens):
+        if not bucket.can_consume(tokens):
+            hold = bucket.expected_time(tokens)
+            self.worker.timer.apply_after(
+                hold * 1000.0, self.cont, (request, bucket, tokens),
+            )
+        else:
+            self.callback(request)
+
+    def put(self, request):
+        name = request.name
+        try:
+            bucket = self.buckets[name]
+        except KeyError:
+            bucket = self.add_bucket_for_type(name)
+        if not bucket:
+            return self.callback(request)
+        return self.cont(request, bucket, 1)
+
+    def add_task_type(self, name):
+        task_type = self.task_registry[name]
+        limit = getattr(task_type, 'rate_limit', None)
+        limit = timeutils.rate(limit)
+        bucket = self.buckets[name] = (
+            TokenBucket(limit, capacity=1) if limit else None
+        )
+        return bucket
+
+    def clear(self):
+        # called by the worker when the connection is lost,
+        # but this also clears out the timer so we be good.
+        pass
+
+    def refresh(self):
+        for name in self.task_registry:
+            self.add_task_type(name)
 
 
 class TaskBucket(object):
@@ -48,9 +91,9 @@ class TaskBucket(object):
     `feed.refresh` and `video.compress`, the TaskBucket will consist
     of the following items::
 
-        {"twitter.update": TokenBucketQueue(fill_rate=300),
-         "feed.refresh": Queue(),
-         "video.compress": TokenBucketQueue(fill_rate=2)}
+        {'twitter.update': TokenBucketQueue(fill_rate=300),
+         'feed.refresh': Queue(),
+         'video.compress': TokenBucketQueue(fill_rate=2)}
 
     The get operation will iterate over these until one of the buckets
     is able to return an item.  The underlying datastructure is a `dict`,
@@ -61,17 +104,19 @@ class TaskBucket(object):
 
     """
 
-    def __init__(self, task_registry):
+    def __init__(self, task_registry, callback=None, worker=None):
         self.task_registry = task_registry
         self.buckets = {}
         self.init_with_registry()
         self.immediate = deque()
         self.mutex = threading.Lock()
         self.not_empty = threading.Condition(self.mutex)
+        self.callback = callback
+        self.worker = worker
 
     def put(self, request):
         """Put a :class:`~celery.worker.job.Request` into
-        the appropiate bucket."""
+        the appropriate bucket."""
         if request.name not in self.buckets:
             self.add_bucket_for_type(request.name)
         self.buckets[request.name].put_nowait(request)
@@ -96,7 +141,7 @@ class TaskBucket(object):
             pass
 
         remaining_times = []
-        for bucket in self.buckets.values():
+        for bucket in values(self.buckets):
             remaining = bucket.expected_time()
             if not remaining:
                 try:
@@ -122,7 +167,7 @@ class TaskBucket(object):
             return min(remaining_times), None
 
     def get(self, block=True, timeout=None):
-        """Retrive the task from the first available bucket.
+        """Retrieve the task from the first available bucket.
 
         Available as in, there is an item in the queue and you can
         consume tokens from it.
@@ -153,12 +198,12 @@ class TaskBucket(object):
 
     def init_with_registry(self):
         """Initialize with buckets for all the task types in the registry."""
-        for task in self.task_registry.keys():
+        for task in self.task_registry:
             self.add_bucket_for_type(task)
 
     def refresh(self):
         """Refresh rate limits for all task types in the registry."""
-        for task in self.task_registry.keys():
+        for task in self.task_registry:
             self.update_bucket_for_type(task)
 
     def get_bucket_for_type(self, task_name):
@@ -175,7 +220,7 @@ class TaskBucket(object):
 
     def update_bucket_for_type(self, task_name):
         task_type = self.task_registry[task_name]
-        rate_limit = getattr(task_type, "rate_limit", None)
+        rate_limit = getattr(task_type, 'rate_limit', None)
         rate_limit = timeutils.rate(rate_limit)
         task_queue = FastQueue()
         if task_name in self.buckets:
@@ -202,15 +247,15 @@ class TaskBucket(object):
 
     def qsize(self):
         """Get the total size of all the queues."""
-        return sum(bucket.qsize() for bucket in self.buckets.values())
+        return sum(bucket.qsize() for bucket in values(self.buckets))
 
     def empty(self):
         """Returns :const:`True` if all of the buckets are empty."""
-        return all(bucket.empty() for bucket in self.buckets.values())
+        return all(bucket.empty() for bucket in values(self.buckets))
 
     def clear(self):
         """Delete the data in all of the buckets."""
-        for bucket in self.buckets.values():
+        for bucket in values(self.buckets):
             bucket.clear()
 
     @property
@@ -218,8 +263,8 @@ class TaskBucket(object):
         """Flattens the data in all of the buckets into a single list."""
         # for queues with contents [(1, 2), (3, 4), (5, 6), (7, 8)]
         # zips and flattens to [1, 3, 5, 7, 2, 4, 6, 8]
-        return filter(None, chain_from_iterable(zip_longest(*[bucket.items
-                                    for bucket in self.buckets.values()])))
+        return [x for x in chain.from_iterable(zip_longest(
+            *[bucket.items for bucket in values(self.buckets)])) if x]
 
 
 class FastQueue(Queue):

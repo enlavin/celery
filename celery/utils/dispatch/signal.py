@@ -3,14 +3,16 @@
 from __future__ import absolute_import
 
 import weakref
+from collections import Callable
 from . import saferef
+from celery.five import range
 
 WEAKREF_TYPES = (weakref.ReferenceType, saferef.BoundMethodWeakref)
 
 
 def _make_id(target):  # pragma: no cover
-    if hasattr(target, 'im_func'):
-        return (id(target.im_self), id(target.im_func))
+    if hasattr(target, '__func__'):
+        return (id(target.__self__), id(target.__func__))
     return id(target)
 
 
@@ -77,8 +79,9 @@ class Signal(object):  # pragma: no cover
                     lookup_key = (_make_id(receiver), _make_id(sender))
 
                 if weak:
-                    receiver = saferef.safe_ref(receiver,
-                                    on_delete=self._remove_receiver)
+                    receiver = saferef.safe_ref(
+                        receiver, on_delete=self._remove_receiver,
+                    )
 
                 for r_key, _ in self.receivers:
                     if r_key == lookup_key:
@@ -90,12 +93,12 @@ class Signal(object):  # pragma: no cover
 
             return _connect_signal
 
-        if args and callable(args[0]):
+        if args and isinstance(args[0], Callable):
             return _handle_options(*args[1:], **kwargs)(args[0])
         return _handle_options(*args, **kwargs)
 
     def disconnect(self, receiver=None, sender=None, weak=True,
-            dispatch_uid=None):
+                   dispatch_uid=None):
         """Disconnect receiver from sender for signal.
 
         If weak references are used, disconnect need not be called. The
@@ -117,7 +120,7 @@ class Signal(object):  # pragma: no cover
         else:
             lookup_key = (_make_id(receiver), _make_id(sender))
 
-        for index in xrange(len(self.receivers)):
+        for index in range(len(self.receivers)):
             (r_key, _) = self.receivers[index]
             if r_key == lookup_key:
                 del self.receivers[index]
@@ -176,7 +179,7 @@ class Signal(object):  # pragma: no cover
         for receiver in self._live_receivers(_make_id(sender)):
             try:
                 response = receiver(signal=self, sender=sender, **named)
-            except Exception, err:
+            except Exception as err:
                 responses.append((receiver, err))
             else:
                 responses.append((receiver, response))
@@ -216,6 +219,6 @@ class Signal(object):  # pragma: no cover
                     del self.receivers[idx]
 
     def __repr__(self):
-        return '<Signal: %s>' % (self.__class__.__name__, )
+        return '<Signal: {0}>'.format(type(self).__name__)
 
     __str__ = __repr__

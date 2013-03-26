@@ -1,7 +1,14 @@
 # -*- coding: utf-8 -*-
+"""
+    celery.concurrency.threads
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    Pool implementation using threads.
+
+"""
 from __future__ import absolute_import
 
-from celery.utils.compat import UserDict
+from celery.five import UserDict
 
 from .base import apply_target, BasePool
 
@@ -19,7 +26,7 @@ class TaskPool(BasePool):
             import threadpool
         except ImportError:
             raise ImportError(
-                    "The threaded pool requires the threadpool module.")
+                'The threaded pool requires the threadpool module.')
         self.WorkRequest = threadpool.WorkRequest
         self.ThreadPool = threadpool.ThreadPool
         super(TaskPool, self).__init__(*args, **kwargs)
@@ -36,7 +43,7 @@ class TaskPool(BasePool):
         self._pool.dismissWorkers(self.limit, do_join=True)
 
     def on_apply(self, target, args=None, kwargs=None, callback=None,
-            accept_callback=None, **_):
+                 accept_callback=None, **_):
         req = self.WorkRequest(apply_target, (target, args, kwargs, callback,
                                               accept_callback))
         self._quick_put(req)

@@ -1,12 +1,40 @@
 # -*- coding: utf-8 -*-
+"""
+    celery.concurrency.eventlet
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    Eventlet pool implementation.
+
+"""
 from __future__ import absolute_import
 
 import os
-if not os.environ.get("EVENTLET_NOPATCH"):
+import sys
+
+EVENTLET_NOPATCH = os.environ.get('EVENTLET_NOPATCH', False)
+EVENTLET_DBLOCK = int(os.environ.get('EVENTLET_NOBLOCK', 0))
+W_RACE = """\
+Celery module with %s imported before eventlet patched\
+"""
+RACE_MODS = ('billiard.', 'celery.', 'kombu.')
+
+
+#: Warn if we couldn't patch early enough,
+#: and thread/socket depending celery modules have already been loaded.
+for mod in (mod for mod in sys.modules if mod.startswith(RACE_MODS)):
+    for side in ('thread', 'threading', 'socket'):
+        if getattr(mod, side, None):
+            import warnings
+            warnings.warn(RuntimeWarning(W_RACE % side))
+
+
+PATCHED = [0]
+if not EVENTLET_NOPATCH and not PATCHED[0]:
+    PATCHED[0] += 1
     import eventlet
     import eventlet.debug
     eventlet.monkey_patch()
-    eventlet.debug.hub_prevent_multiple_readers(False)
+    eventlet.debug.hub_blocking_detection(EVENTLET_DBLOCK)
 
 from time import time
 
@@ -116,9 +144,10 @@ class TaskPool(base.BasePool):
         signals.eventlet_pool_postshutdown.send(sender=self)
 
     def on_apply(self, target, args=None, kwargs=None, callback=None,
-            accept_callback=None, **_):
-        self._quick_apply_sig(sender=self,
-                target=target, args=args, kwargs=kwargs)
+                 accept_callback=None, **_):
+        self._quick_apply_sig(
+            sender=self, target=target, args=args, kwargs=kwargs,
+        )
         self._quick_put(apply_target, target, args, kwargs,
                         callback, accept_callback,
                         self.getpid)

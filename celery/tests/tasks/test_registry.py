@@ -1,5 +1,4 @@
 from __future__ import absolute_import
-from __future__ import with_statement
 
 from celery.app.registry import TaskRegistry
 from celery.task import Task, PeriodicTask
@@ -7,14 +6,14 @@ from celery.tests.utils import Case
 
 
 class MockTask(Task):
-    name = "celery.unittest.test_task"
+    name = 'celery.unittest.test_task'
 
     def run(self, **kwargs):
         return True
 
 
 class MockPeriodicTask(PeriodicTask):
-    name = "celery.unittest.test_periodic_task"
+    name = 'celery.unittest.test_periodic_task'
     run_every = 10
 
     def run(self, **kwargs):
@@ -24,7 +23,7 @@ class MockPeriodicTask(PeriodicTask):
 class test_TaskRegistry(Case):
 
     def test_NotRegistered_str(self):
-        self.assertTrue(repr(TaskRegistry.NotRegistered("tasks.add")))
+        self.assertTrue(repr(TaskRegistry.NotRegistered('tasks.add')))
 
     def assertRegisterUnregisterCls(self, r, task):
         with self.assertRaises(r.NotRegistered):
@@ -40,8 +39,7 @@ class test_TaskRegistry(Case):
 
     def test_task_registry(self):
         r = TaskRegistry()
-        self.assertIsInstance(r, dict,
-                "TaskRegistry is mapping")
+        self.assertIsInstance(r, dict, 'TaskRegistry is mapping')
 
         self.assertRegisterUnregisterCls(r, MockTask)
         self.assertRegisterUnregisterCls(r, MockPeriodicTask)
@@ -54,11 +52,11 @@ class test_TaskRegistry(Case):
         tasks = dict(r)
         self.assertIsInstance(tasks.get(MockTask.name), MockTask)
         self.assertIsInstance(tasks.get(MockPeriodicTask.name),
-                                   MockPeriodicTask)
+                              MockPeriodicTask)
 
         self.assertIsInstance(r[MockTask.name], MockTask)
         self.assertIsInstance(r[MockPeriodicTask.name],
-                                   MockPeriodicTask)
+                              MockPeriodicTask)
 
         r.unregister(MockTask)
         self.assertNotIn(MockTask.name, r)

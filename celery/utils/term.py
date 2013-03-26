@@ -5,24 +5,24 @@
 
     Terminals and colors.
 
-    :copyright: (c) 2009 - 2012 by Ask Solem.
-    :license: BSD, see LICENSE for more details.
-
 """
-from __future__ import absolute_import
+from __future__ import absolute_import, unicode_literals
 
 import platform
 
-from .encoding import safe_str
+from functools import reduce
+
+from kombu.utils.encoding import safe_str
+from celery.five import string
 
 BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
-OP_SEQ = "\033[%dm"
-RESET_SEQ = "\033[0m"
-COLOR_SEQ = "\033[1;%dm"
+OP_SEQ = '\033[%dm'
+RESET_SEQ = '\033[0m'
+COLOR_SEQ = '\033[1;%dm'
 fg = lambda s: COLOR_SEQ % s
 
 SYSTEM = platform.system()
-IS_WINDOWS = SYSTEM == "Windows"
+IS_WINDOWS = SYSTEM == 'Windows'
 
 
 class colored(object):
@@ -30,56 +30,57 @@ class colored(object):
 
     Example::
         >>> c = colored(enabled=True)
-        >>> print(str(c.red("the quick "), c.blue("brown ", c.bold("fox ")),
-        ...       c.magenta(c.underline("jumps over")),
-        ...       c.yellow(" the lazy "),
-        ...       c.green("dog ")))
+        >>> print(str(c.red('the quick '), c.blue('brown ', c.bold('fox ')),
+        ...       c.magenta(c.underline('jumps over')),
+        ...       c.yellow(' the lazy '),
+        ...       c.green('dog ')))
 
     """
 
     def __init__(self, *s, **kwargs):
         self.s = s
-        self.enabled = not IS_WINDOWS and kwargs.get("enabled", True)
-        self.op = kwargs.get("op", "")
-        self.names = {"black": self.black,
-                      "red": self.red,
-                      "green": self.green,
-                      "yellow": self.yellow,
-                      "blue": self.blue,
-                      "magenta": self.magenta,
-                      "cyan": self.cyan,
-                      "white": self.white}
+        self.enabled = not IS_WINDOWS and kwargs.get('enabled', True)
+        self.op = kwargs.get('op', '')
+        self.names = {'black': self.black,
+                      'red': self.red,
+                      'green': self.green,
+                      'yellow': self.yellow,
+                      'blue': self.blue,
+                      'magenta': self.magenta,
+                      'cyan': self.cyan,
+                      'white': self.white}
 
     def _add(self, a, b):
-        return unicode(a) + unicode(b)
+        return string(a) + string(b)
 
     def _fold_no_color(self, a, b):
         try:
             A = a.no_color()
         except AttributeError:
-            A = unicode(a)
+            A = string(a)
         try:
             B = b.no_color()
         except AttributeError:
-            B = unicode(b)
-        return safe_str(A) + safe_str(B)
+            B = string(b)
+
+        return safe_str(safe_str(A) + safe_str(B))
 
     def no_color(self):
         if self.s:
-            return reduce(self._fold_no_color, self.s)
-        return ""
+            return safe_str(reduce(self._fold_no_color, self.s))
+        return ''
 
     def embed(self):
-        prefix = ""
+        prefix = ''
         if self.enabled:
             prefix = self.op
-        return prefix + safe_str(reduce(self._add, self.s))
+        return safe_str(prefix) + safe_str(reduce(self._add, self.s))
 
     def __unicode__(self):
-        suffix = ""
+        suffix = ''
         if self.enabled:
             suffix = RESET_SEQ
-        return safe_str(self.embed() + suffix)
+        return safe_str(self.embed() + safe_str(suffix))
 
     def __str__(self):
         return safe_str(self.__unicode__())
@@ -151,7 +152,7 @@ class colored(object):
         return self.node(s, fg(40 + WHITE))
 
     def reset(self, *s):
-        return self.node(s or [""], RESET_SEQ)
+        return self.node(s or [''], RESET_SEQ)
 
     def __add__(self, other):
-        return unicode(self) + unicode(other)
+        return string(self) + string(other)

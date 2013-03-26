@@ -1,10 +1,21 @@
+# -*- coding: utf-8 -*-
+"""
+    celery.worker.hub
+    ~~~~~~~~~~~~~~~~~
+
+    Event-loop implementation.
+
+"""
 from __future__ import absolute_import
 
 from kombu.utils import cached_property
 from kombu.utils import eventio
 
+from celery.five import items, range
+from celery.utils.log import get_logger
 from celery.utils.timer2 import Schedule
 
+logger = get_logger(__name__)
 READ, WRITE, ERR = eventio.READ, eventio.WRITE, eventio.ERR
 
 
@@ -21,7 +32,7 @@ class BoundedSemaphore(object):
         >>> x = BoundedSemaphore(2)
 
         >>> def callback(i):
-        ...     print("HELLO %r" % i)
+        ...     print('HELLO {0!r}'.format(i))
 
         >>> x.acquire(callback, 1)
         HELLO 1
@@ -47,7 +58,7 @@ class BoundedSemaphore(object):
         the semaphore is ready.
 
         :param callback: The callback to apply.
-        :param *partial_args: partial arguments to callback.
+        :param \*partial_args: partial arguments to callback.
 
         """
         if self.value <= 0:
@@ -74,7 +85,7 @@ class BoundedSemaphore(object):
         """Change the size of the semaphore to hold more values."""
         self.initial_value += n
         self.value += n
-        [self.release() for _ in xrange(n)]
+        [self.release() for _ in range(n)]
 
     def shrink(self, n=1):
         """Change the size of the semaphore to hold less values."""
@@ -124,26 +135,32 @@ class Hub(object):
         self.on_task = []
 
     def start(self):
-        """Called by StartStopComponent at worker startup."""
+        """Called by Hub bootstep at worker startup."""
         self.poller = eventio.poll()
 
     def stop(self):
-        """Called by StartStopComponent at worker shutdown."""
+        """Called by Hub bootstep at worker shutdown."""
         self.poller.close()
 
     def init(self):
         for callback in self.on_init:
             callback(self)
 
-    def fire_timers(self, min_delay=1, max_delay=10, max_timers=10):
+    def fire_timers(self, min_delay=1, max_delay=10, max_timers=10,
+                    propagate=()):
         delay = None
         if self.timer._queue:
-            for i in xrange(max_timers):
-                delay, entry = self.scheduler.next()
+            for i in range(max_timers):
+                delay, entry = next(self.scheduler)
                 if entry is None:
                     break
-                self.timer.apply_entry(entry)
-        return min(max(delay, min_delay), max_delay)
+                try:
+                    entry()
+                except propagate:
+                    raise
+                except Exception as exc:
+                    logger.error('Error in timer: %r', exc, exc_info=1)
+        return min(max(delay or 0, min_delay), max_delay)
 
     def add(self, fd, callback, flags):
         self.poller.register(fd, flags)
@@ -161,10 +178,10 @@ class Hub(object):
         return self.add(fd, callback, WRITE)
 
     def update_readers(self, map):
-        [self.add_reader(*x) for x in map.iteritems()]
+        [self.add_reader(*x) for x in items(map)]
 
     def update_writers(self, map):
-        [self.add_writer(*x) for x in map.iteritems()]
+        [self.add_writer(*x) for x in items(map)]
 
     def _unregister(self, fd):
         try:

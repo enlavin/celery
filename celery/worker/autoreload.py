@@ -6,9 +6,7 @@
     This module implements automatic module reloading
 """
 from __future__ import absolute_import
-from __future__ import with_statement
 
-import errno
 import hashlib
 import os
 import select
@@ -16,15 +14,19 @@ import sys
 import time
 
 from collections import defaultdict
+from threading import Event
 
 from kombu.utils import eventio
+from kombu.utils.encoding import ensure_bytes
 
-from celery.platforms import ignore_EBADF
+from celery import bootsteps
+from celery.five import items
+from celery.platforms import ignore_errno
 from celery.utils.imports import module_file
 from celery.utils.log import get_logger
-from celery.utils.threads import bgThread, Event
+from celery.utils.threads import bgThread
 
-from .abstract import StartStopComponent
+from .components import Pool
 
 try:                        # pragma: no cover
     import pyinotify
@@ -36,9 +38,10 @@ except ImportError:         # pragma: no cover
 logger = get_logger(__name__)
 
 
-class WorkerComponent(StartStopComponent):
-    name = "worker.autoreloader"
-    requires = ("pool", )
+class WorkerComponent(bootsteps.StartStopStep):
+    label = 'Autoreloader'
+    conditional = True
+    requires = (Pool, )
 
     def __init__(self, w, autoreload=None, **kwargs):
         self.enabled = w.autoreload = autoreload
@@ -54,23 +57,23 @@ class WorkerComponent(StartStopComponent):
         return w.autoreloader
 
     def create(self, w):
-        if hasattr(select, "kqueue") and w.use_eventloop:
+        if hasattr(select, 'kqueue') and w.use_eventloop:
             return self.create_ev(w)
         return self.create_threaded(w)
 
 
-def file_hash(filename, algorithm="md5"):
+def file_hash(filename, algorithm='md5'):
     hobj = hashlib.new(algorithm)
-    with open(filename, "rb") as f:
+    with open(filename, 'rb') as f:
         for chunk in iter(lambda: f.read(2 ** 20), ''):
-            hobj.update(chunk)
+            hobj.update(ensure_bytes(chunk))
     return hobj.digest()
 
 
 class BaseMonitor(object):
 
-    def __init__(self, files, on_change=None, shutdown_event=None,
-            interval=0.5):
+    def __init__(self, files,
+                 on_change=None, shutdown_event=None, interval=0.5):
         self.files = files
         self.interval = interval
         self._on_change = on_change
@@ -78,7 +81,7 @@ class BaseMonitor(object):
         self.shutdown_event = shutdown_event or Event()
 
     def start(self):
-        raise NotImplementedError("Subclass responsibility")
+        raise NotImplementedError('Subclass responsibility')
 
     def stop(self):
         pass
@@ -100,9 +103,9 @@ class StatMonitor(BaseMonitor):
     def start(self):
         while not self.shutdown_event.is_set():
             modified = dict((f, mt) for f, mt in self._mtimes()
-                                if self._maybe_modified(f, mt))
+                            if self._maybe_modified(f, mt))
             if modified:
-                self.on_change(modified.keys())
+                self.on_change(modified)
                 self.modify_times.update(modified)
             time.sleep(self.interval)
 
@@ -146,10 +149,10 @@ class KQueueMonitor(BaseMonitor):
             self.poller.poll(1)
 
     def close(self, poller):
-        for f, fd in self.filemap.iteritems():
+        for f, fd in items(self.filemap):
             if fd is not None:
                 poller.unregister(fd)
-                with ignore_EBADF():  # pragma: no cover
+                with ignore_errno('EBADF'):  # pragma: no cover
                     os.close(fd)
         self.filemap.clear()
         self.fdmap.clear()
@@ -199,18 +202,18 @@ class InotifyMonitor(_ProcessEvent):
 
 def default_implementation():
     # kqueue monitor not working properly at this time.
-    if hasattr(select, "kqueue"):
-        return "kqueue"
-    if sys.platform.startswith("linux") and pyinotify:
-        return "inotify"
+    if hasattr(select, 'kqueue'):
+        return 'kqueue'
+    if sys.platform.startswith('linux') and pyinotify:
+        return 'inotify'
     else:
-        return "stat"
+        return 'stat'
 
-implementations = {"kqueue": KQueueMonitor,
-                   "inotify": InotifyMonitor,
-                   "stat": StatMonitor}
+implementations = {'kqueue': KQueueMonitor,
+                   'inotify': InotifyMonitor,
+                   'stat': StatMonitor}
 Monitor = implementations[
-            os.environ.get("CELERYD_FSNOTIFY") or default_implementation()]
+    os.environ.get('CELERYD_FSNOTIFY') or default_implementation()]
 
 
 class Autoreloader(bgThread):
@@ -225,12 +228,17 @@ class Autoreloader(bgThread):
         self.options = options
         self._monitor = None
         self._hashes = None
+        self.file_to_module = {}
 
     def on_init(self):
-        files = [module_file(sys.modules[m]) for m in self.modules]
-        self._hashes = dict((f, file_hash(f)) for f in files)
-        self._monitor = self.Monitor(files, self.on_change,
-                shutdown_event=self._is_shutdown, **self.options)
+        files = self.file_to_module
+        files.update(dict(
+            (module_file(sys.modules[m]), m) for m in self.modules))
+
+        self._monitor = self.Monitor(
+            files, self.on_change,
+            shutdown_event=self._is_shutdown, **self.options)
+        self._hashes = dict([(f, file_hash(f)) for f in files])
 
     def on_poll_init(self, hub):
         if self._monitor is None:
@@ -243,11 +251,8 @@ class Autoreloader(bgThread):
 
     def body(self):
         self.on_init()
-        try:
+        with ignore_errno('EINTR', 'EAGAIN'):
             self._monitor.start()
-        except OSError, exc:
-            if exc.errno not in (errno.EINTR, errno.EAGAIN):
-                raise
 
     def _maybe_modified(self, f):
         digest = file_hash(f)
@@ -259,8 +264,8 @@ class Autoreloader(bgThread):
     def on_change(self, files):
         modified = [f for f in files if self._maybe_modified(f)]
         if modified:
-            names = [self._module_name(module) for module in modified]
-            logger.info("Detected modified modules: %r", names)
+            names = [self.file_to_module[module] for module in modified]
+            logger.info('Detected modified modules: %r', names)
             self._reload(names)
 
     def _reload(self, modules):
@@ -269,7 +274,3 @@ class Autoreloader(bgThread):
     def stop(self):
         if self._monitor:
             self._monitor.stop()
-
-    @staticmethod
-    def _module_name(path):
-        return os.path.splitext(os.path.basename(path))[0]

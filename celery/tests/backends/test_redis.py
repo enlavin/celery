@@ -1,5 +1,4 @@
 from __future__ import absolute_import
-from __future__ import with_statement
 
 from datetime import timedelta
 
@@ -7,13 +6,14 @@ from mock import Mock, patch
 from nose import SkipTest
 from pickle import loads, dumps
 
+from kombu.utils import cached_property, uuid
+
 from celery import current_app
 from celery import states
 from celery.datastructures import AttributeDict
 from celery.exceptions import ImproperlyConfigured
 from celery.result import AsyncResult
 from celery.task import subtask
-from celery.utils import cached_property, uuid
 from celery.utils.timeutils import timedelta_seconds
 
 from celery.tests.utils import Case
@@ -92,7 +92,7 @@ class test_RedisBackend(Case):
             x = RedisBackend()
             self.assertTrue(loads(dumps(x)))
         except ImportError:
-            raise SkipTest("redis not installed")
+            raise SkipTest('redis not installed')
 
     def test_no_redis(self):
         self.MockBackend.redis = None
@@ -100,14 +100,14 @@ class test_RedisBackend(Case):
             self.MockBackend()
 
     def test_url(self):
-        x = self.MockBackend("redis://foobar//1")
-        self.assertEqual(x.host, "foobar")
-        self.assertEqual(x.db, "1")
+        x = self.MockBackend('redis://foobar//1')
+        self.assertEqual(x.host, 'foobar')
+        self.assertEqual(x.db, '1')
 
     def test_conf_raises_KeyError(self):
-        conf = AttributeDict({"CELERY_RESULT_SERIALIZER": "json",
-                              "CELERY_MAX_CACHED_RESULTS": 1,
-                              "CELERY_TASK_RESULT_EXPIRES": None})
+        conf = AttributeDict({'CELERY_RESULT_SERIALIZER': 'json',
+                              'CELERY_MAX_CACHED_RESULTS': 1,
+                              'CELERY_TASK_RESULT_EXPIRES': None})
         prev, current_app.conf = current_app.conf, conf
         try:
             self.MockBackend()
@@ -138,44 +138,47 @@ class test_RedisBackend(Case):
         self.assertEqual(b.expires, 60)
 
     def test_on_chord_apply(self):
-        self.Backend().on_chord_apply("setid", {},
-                                      result=map(AsyncResult, [1, 2, 3]))
+        self.Backend().on_chord_apply(
+            'group_id', {},
+            result=[AsyncResult(x) for x in [1, 2, 3]],
+        )
 
     def test_mget(self):
         b = self.MockBackend()
-        self.assertTrue(b.mget(["a", "b", "c"]))
-        b.client.mget.assert_called_with(["a", "b", "c"])
+        self.assertTrue(b.mget(['a', 'b', 'c']))
+        b.client.mget.assert_called_with(['a', 'b', 'c'])
 
     def test_set_no_expire(self):
         b = self.MockBackend()
         b.expires = None
-        b.set("foo", "bar")
+        b.set('foo', 'bar')
 
-    @patch("celery.result.TaskSetResult")
+    @patch('celery.result.GroupResult')
     def test_on_chord_part_return(self, setresult):
         b = self.MockBackend()
         deps = Mock()
-        deps.total = 10
+        deps.__len__ = Mock()
+        deps.__len__.return_value = 10
         setresult.restore.return_value = deps
         b.client.incr.return_value = 1
         task = Mock()
-        task.name = "foobarbaz"
+        task.name = 'foobarbaz'
         try:
-            current_app.tasks["foobarbaz"] = task
+            current_app.tasks['foobarbaz'] = task
             task.request.chord = subtask(task)
-            task.request.taskset = "setid"
+            task.request.group = 'group_id'
 
             b.on_chord_part_return(task)
             self.assertTrue(b.client.incr.call_count)
 
-            b.client.incr.return_value = deps.total
+            b.client.incr.return_value = len(deps)
             b.on_chord_part_return(task)
-            deps.join.assert_called_with(propagate=False)
+            deps.join_native.assert_called_with(propagate=True)
             deps.delete.assert_called_with()
 
             self.assertTrue(b.client.expire.call_count)
         finally:
-            current_app.tasks.pop("foobarbaz")
+            current_app.tasks.pop('foobarbaz')
 
     def test_process_cleanup(self):
         self.Backend().process_cleanup()

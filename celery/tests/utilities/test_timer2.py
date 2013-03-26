@@ -1,5 +1,4 @@
 from __future__ import absolute_import
-from __future__ import with_statement
 
 import sys
 import time
@@ -17,13 +16,13 @@ class test_Entry(Case):
     def test_call(self):
         scratch = [None]
 
-        def timed(x, y, moo="foo"):
+        def timed(x, y, moo='foo'):
             scratch[0] = (x, y, moo)
 
-        tref = timer2.Entry(timed, (4, 4), {"moo": "baz"})
+        tref = timer2.Entry(timed, (4, 4), {'moo': 'baz'})
         tref()
 
-        self.assertTupleEqual(scratch[0], (4, 4, "baz"))
+        self.assertTupleEqual(scratch[0], (4, 4, 'baz'))
 
     def test_cancel(self):
         tref = timer2.Entry(lambda x: x, (1, ), {})
@@ -33,9 +32,17 @@ class test_Entry(Case):
 
 class test_Schedule(Case):
 
+    def test_supports_Timer_interface(self):
+        x = timer2.Schedule()
+        x.stop()
+
+        tref = Mock()
+        x.cancel(tref)
+        tref.cancel.assert_called_with()
+
     def test_handle_error(self):
         from datetime import datetime
-        mktime = timer2.mktime
+        to_timestamp = timer2.to_timestamp
         scratch = [None]
 
         def _overflow(x):
@@ -46,7 +53,7 @@ class test_Schedule(Case):
 
         s = timer2.Schedule(on_error=on_error)
 
-        timer2.mktime = _overflow
+        timer2.to_timestamp = _overflow
         try:
             s.enter(timer2.Entry(lambda: None, (), {}),
                     eta=datetime.now())
@@ -57,7 +64,7 @@ class test_Schedule(Case):
                 s.enter(timer2.Entry(lambda: None, (), {}),
                         eta=datetime.now())
         finally:
-            timer2.mktime = mktime
+            timer2.to_timestamp = to_timestamp
 
         exc = scratch[0]
         self.assertIsInstance(exc, OverflowError)
@@ -75,8 +82,12 @@ class test_Timer(Case):
                 done[0] = True
 
             t.apply_after(300, set_done)
+            mss = 0
             while not done[0]:
+                if mss >= 2.0:
+                    raise Exception('test timed out')
                 time.sleep(0.1)
+                mss += 0.1
         finally:
             t.stop()
 
@@ -92,7 +103,7 @@ class test_Timer(Case):
             t.schedule.enter_after = Mock()
 
             myfun = Mock()
-            myfun.__name__ = "myfun"
+            myfun.__name__ = 'myfun'
             t.apply_interval(30, myfun)
 
             self.assertEqual(t.schedule.enter_after.call_count, 1)
@@ -112,7 +123,7 @@ class test_Timer(Case):
         finally:
             t.stop()
 
-    @patch("celery.utils.timer2.logger")
+    @patch('celery.utils.timer2.logger')
     def test_apply_entry_error_handled(self, logger):
         t = timer2.Timer()
         t.schedule.on_error = None
@@ -134,7 +145,7 @@ class test_Timer(Case):
         fun.assert_called_with()
         self.assertFalse(stderr.getvalue())
 
-    @patch("os._exit")
+    @patch('os._exit')
     def test_thread_crash(self, _exit):
         t = timer2.Timer()
         t._next_entry = Mock()
@@ -150,3 +161,25 @@ class test_Timer(Case):
         t._is_shutdown.set()
         t.run()
         t._is_stopped.set.assert_called_with()
+
+    def test_to_timestamp(self):
+        self.assertIs(timer2.to_timestamp(3.13), 3.13)
+
+    def test_test_enter(self):
+        t = timer2.Timer()
+        t._do_enter = Mock()
+        e = Mock()
+        t.enter(e, 13, 0)
+        t._do_enter.assert_called_with('enter', e, 13, priority=0)
+
+    def test_test_enter_after(self):
+        t = timer2.Timer()
+        t._do_enter = Mock()
+        t.enter_after()
+        t._do_enter.assert_called_with('enter_after')
+
+    def test_cancel(self):
+        t = timer2.Timer()
+        tref = Mock()
+        t.cancel(tref)
+        tref.cancel.assert_called_with()

@@ -1,21 +1,34 @@
+# -*- coding: utf-8 -*-
+"""
+    celery.app.annotations
+    ~~~~~~~~~~~~~~~~~~~~~~
+
+    Annotations is a nice term for moneky patching
+    task classes in the configuration.
+
+    This prepares and performs the annotations in the
+    :setting:`CELERY_ANNOTATIONS` setting.
+
+"""
 from __future__ import absolute_import
 
+from celery.five import string_t
 from celery.utils.functional import firstmethod, mpromise
 from celery.utils.imports import instantiate
 
-_first_match = firstmethod("annotate")
-_first_match_any = firstmethod("annotate_any")
+_first_match = firstmethod('annotate')
+_first_match_any = firstmethod('annotate_any')
 
 
 def resolve_all(anno, task):
-    return filter(None, (_first_match(anno, task), _first_match_any(anno)))
+    return (x for x in (_first_match(anno, task), _first_match_any(anno)) if x)
 
 
 class MapAnnotation(dict):
 
     def annotate_any(self):
         try:
-            return dict(self["*"])
+            return dict(self['*'])
         except KeyError:
             pass
 
@@ -32,7 +45,7 @@ def prepare(annotations):
     def expand_annotation(annotation):
         if isinstance(annotation, dict):
             return MapAnnotation(annotation)
-        elif isinstance(annotation, basestring):
+        elif isinstance(annotation, string_t):
             return mpromise(instantiate, annotation)
         return annotation
 
@@ -40,4 +53,4 @@ def prepare(annotations):
         return ()
     elif not isinstance(annotations, (list, tuple)):
         annotations = (annotations, )
-    return map(expand_annotation, annotations)
+    return [expand_annotation(a) for a in annotations]

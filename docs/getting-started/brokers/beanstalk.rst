@@ -12,7 +12,9 @@ Installation
 For the Beanstalk support you have to install additional dependencies.
 You can install both Celery and these dependencies in one go using
 either the `celery-with-beanstalk`_, or the `django-celery-with-beanstalk`
-bundles::
+bundles:
+
+.. code-block:: bash
 
     $ pip install -U celery-with-beanstalk
 
@@ -27,9 +29,9 @@ Configuration
 =============
 
 Configuration is easy, set the transport, and configure the location of
-your CouchDB database::
+your Beanstalk database::
 
-    BROKER_URL = "beanstalk://localhost:11300"
+    BROKER_URL = 'beanstalk://localhost:11300'
 
 Where the URL is in the format of::
 
@@ -52,6 +54,7 @@ Limitations
 
 The Beanstalk message transport does not currently support:
 
-    * Remote control commands (celeryctl, broadcast)
+    * Remote control commands (:program:`celery control`,
+      :program:`celery inspect`, broadcast)
     * Authentication
 

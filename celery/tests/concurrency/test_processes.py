@@ -1,19 +1,17 @@
 from __future__ import absolute_import
-from __future__ import with_statement
 
-import signal
 import time
 
 from itertools import cycle
 
-from mock import Mock, patch
+from mock import Mock
 from nose import SkipTest
 
+from celery.five import items, range
 from celery.utils.functional import noop
 from celery.tests.utils import Case
 try:
     from celery.concurrency import processes as mp
-    from billiard.pool import safe_apply_callback
 except ImportError:
 
     class _mp(object):
@@ -34,13 +32,12 @@ except ImportError:
             def apply_async(self, *args, **kwargs):
                 pass
     mp = _mp()  # noqa
-    safe_apply_callback = None  # noqa
 
 
 class Object(object):   # for writeable attributes.
 
     def __init__(self, **kwargs):
-        [setattr(self, k, v) for k, v in kwargs.items()]
+        [setattr(self, k, v) for k, v in items(kwargs)]
 
 
 class MockResult(object):
@@ -65,14 +62,17 @@ class MockPool(object):
 
     def __init__(self, *args, **kwargs):
         self.started = True
+        self._timeout_handler = Mock()
+        self._result_handler = Mock()
+        self.maintain_pool = Mock()
         self._state = mp.RUN
-        self._processes = kwargs.get("processes")
+        self._processes = kwargs.get('processes')
         self._pool = [Object(pid=i) for i in range(self._processes)]
-        self._current_proc = cycle(xrange(self._processes)).next
+        self._current_proc = cycle(range(self._processes))
 
     def close(self):
         self.closed = True
-        self._state = "CLOSE"
+        self._state = 'CLOSE'
 
     def join(self):
         self.joined = True
@@ -96,7 +96,7 @@ class ExeMockPool(MockPool):
         from threading import Timer
         res = target(*args, **kwargs)
         Timer(0.1, callback, (res, )).start()
-        return MockResult(res, self._current_proc())
+        return MockResult(res, next(self._current_proc))
 
 
 class TaskPool(mp.TaskPool):
@@ -113,7 +113,7 @@ class test_TaskPool(Case):
         try:
             import multiprocessing  # noqa
         except ImportError:
-            raise SkipTest("multiprocessing not supported")
+            raise SkipTest('multiprocessing not supported')
 
     def test_start(self):
         pool = TaskPool(10)
@@ -133,39 +133,16 @@ class test_TaskPool(Case):
         pool.terminate()
         self.assertTrue(_pool.terminated)
 
-    def test_safe_apply_callback(self):
-        if safe_apply_callback is None:
-            raise SkipTest("multiprocessig not supported")
-        _good_called = [0]
-        _evil_called = [0]
-
-        def good(x):
-            _good_called[0] = 1
-            return x
-
-        def evil(x):
-            _evil_called[0] = 1
-            raise KeyError(x)
-
-        self.assertIsNone(safe_apply_callback(good, 10))
-        self.assertIsNone(safe_apply_callback(evil, 10))
-        self.assertTrue(_good_called[0])
-        self.assertTrue(_evil_called[0])
-
     def test_apply_async(self):
         pool = TaskPool(10)
         pool.start()
         pool.apply_async(lambda x: x, (2, ), {})
 
     def test_terminate_job(self):
-
-        @patch("celery.concurrency.processes._kill")
-        def _do_test(_kill):
-            pool = TaskPool(10)
-            pool.terminate_job(1341)
-            _kill.assert_called_with(1341, signal.SIGTERM)
-
-        _do_test()
+        pool = TaskPool(10)
+        pool._pool = Mock()
+        pool.terminate_job(1341)
+        pool._pool.terminate_job.assert_called_with(1341, None)
 
     def test_grow_shrink(self):
         pool = TaskPool(10)
@@ -184,9 +161,9 @@ class test_TaskPool(Case):
                             timeout=10,
                             soft_timeout=5)
         info = pool.info
-        self.assertEqual(info["max-concurrency"], pool.limit)
-        self.assertIsNone(info["max-tasks-per-child"])
-        self.assertEqual(info["timeouts"], (5, 10))
+        self.assertEqual(info['max-concurrency'], pool.limit)
+        self.assertIsNone(info['max-tasks-per-child'])
+        self.assertEqual(info['timeouts'], (5, 10))
 
     def test_num_processes(self):
         pool = TaskPool(7)
@@ -200,7 +177,7 @@ class test_TaskPool(Case):
         pool._pool.restart.assert_called_with()
 
     def test_restart(self):
-        raise SkipTest("functional test")
+        raise SkipTest('functional test')
 
         def get_pids(pool):
             return set([p.pid for p in pool._pool._pool])

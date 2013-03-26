@@ -5,23 +5,20 @@
 
     Utilities for functions.
 
-    :copyright: (c) 2009 - 2012 by Ask Solem.
-    :license: BSD, see LICENSE for more details.
-
 """
 from __future__ import absolute_import
-from __future__ import with_statement
 
 import operator
+import threading
 
 from functools import partial, wraps
 from itertools import islice
-from threading import Lock, RLock
 
 from kombu.utils import cached_property
 from kombu.utils.functional import promise, maybe_promise
+from kombu.utils.compat import OrderedDict
 
-from .compat import UserDict, UserList, OrderedDict
+from celery.five import UserDict, UserList, items, keys, string_t
 
 KEYWORD_MARK = object()
 is_not_None = partial(operator.is_not, None)
@@ -39,7 +36,7 @@ class LRUCache(UserDict):
 
     def __init__(self, limit=None):
         self.limit = limit
-        self.mutex = RLock()
+        self.mutex = threading.RLock()
         self.data = OrderedDict()
 
     def __getitem__(self, key):
@@ -49,7 +46,7 @@ class LRUCache(UserDict):
 
     def keys(self):
         # userdict.keys in py3k calls __getitem__
-        return self.data.keys()
+        return keys(self.data)
 
     def values(self):
         return list(self._iterate_values())
@@ -61,11 +58,11 @@ class LRUCache(UserDict):
         # remove least recently used key.
         with self.mutex:
             if self.limit and len(self.data) >= self.limit:
-                self.data.pop(iter(self.data).next())
+                self.data.pop(next(iter(self.data)))
             self.data[key] = value
 
     def __iter__(self):
-        return self.data.iterkeys()
+        return iter(self.data)
 
     def _iterate_items(self):
         for k in self:
@@ -91,24 +88,35 @@ class LRUCache(UserDict):
             self[key] = str(newval)
         return newval
 
+    def __getstate__(self):
+        d = dict(vars(self))
+        d.pop('mutex')
+        return d
+
+    def __setstate__(self, state):
+        self.__dict__ = state
+        self.mutex = threading.RLock()
+
 
 def is_list(l):
-    return hasattr(l, "__iter__") and not isinstance(l, (dict, basestring))
+    """Returns true if object is list-like, but not a dict or string."""
+    return hasattr(l, '__iter__') and not isinstance(l, (dict, string_t))
 
 
 def maybe_list(l):
+    """Returns list of one element if ``l`` is a scalar."""
     return l if l is None or is_list(l) else [l]
 
 
 def memoize(maxsize=None, Cache=LRUCache):
 
     def _memoize(fun):
-        mutex = Lock()
+        mutex = threading.Lock()
         cache = Cache(limit=maxsize)
 
         @wraps(fun)
         def _M(*args, **kwargs):
-            key = args + (KEYWORD_MARK, ) + tuple(sorted(kwargs.iteritems()))
+            key = args + (KEYWORD_MARK, ) + tuple(sorted(kwargs.items()))
             try:
                 with mutex:
                     value = cache[key]
@@ -220,13 +228,13 @@ def padlist(container, size, default=None):
 
     Examples:
 
-        >>> first, last, city = padlist(["George", "Costanza", "NYC"], 3)
-        ("George", "Costanza", "NYC")
-        >>> first, last, city = padlist(["George", "Costanza"], 3)
-        ("George", "Costanza", None)
-        >>> first, last, city, planet = padlist(["George", "Costanza",
-                                                 "NYC"], 4, default="Earth")
-        ("George", "Costanza", "NYC", "Earth")
+        >>> first, last, city = padlist(['George', 'Costanza', 'NYC'], 3)
+        ('George', 'Costanza', 'NYC')
+        >>> first, last, city = padlist(['George', 'Costanza'], 3)
+        ('George', 'Costanza', None)
+        >>> first, last, city, planet = padlist(['George', 'Costanza',
+                                                 'NYC'], 4, default='Earth')
+        ('George', 'Costanza', 'NYC', 'Earth')
 
     """
     return list(container)[:size] + [default] * (size - len(container))
@@ -236,15 +244,22 @@ def mattrgetter(*attrs):
     """Like :func:`operator.itemgetter` but returns :const:`None` on missing
     attributes instead of raising :exc:`AttributeError`."""
     return lambda obj: dict((attr, getattr(obj, attr, None))
-                                for attr in attrs)
+                            for attr in attrs)
 
 
 def uniq(it):
+    """Returns all unique elements in ``it``, preserving order."""
     seen = set()
-    for obj in it:
-        if obj not in seen:
-            yield obj
-            seen.add(obj)
+    return (seen.add(obj) or obj for obj in it if obj not in seen)
+
+
+def regen(it):
+    """Regen takes any iterable, and if the object is an
+    generator it will cache the evaluated list on first access,
+    so that the generator can be "consumed" multiple times."""
+    if isinstance(it, (list, tuple)):
+        return it
+    return _regen(it)
 
 
 class _regen(UserList, list):
@@ -256,11 +271,7 @@ class _regen(UserList, list):
     def data(self):
         return list(self.__it)
 
-    def __iter__(self):  # needed for Python 2.5
-        return iter(self.data)
 
-
-def regen(it):
-    if isinstance(it, (list, tuple)):
-        return it
-    return _regen(it)
+def dictfilter(d, **filterkeys):
+    d = dict(d, **filterkeys) if filterkeys else d
+    return dict((k, v) for k, v in items(d) if v is not None)

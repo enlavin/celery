@@ -1,13 +1,30 @@
 # -*- coding: utf-8 -*-
+"""
+    celery.backends.cache
+    ~~~~~~~~~~~~~~~~~~~~~
+
+    Memcache and in-memory cache result backend.
+
+"""
 from __future__ import absolute_import
+
+from kombu.utils import cached_property
 
 from celery.datastructures import LRUCache
 from celery.exceptions import ImproperlyConfigured
-from celery.utils import cached_property
 
 from .base import KeyValueStoreBackend
 
 _imp = [None]
+
+REQUIRES_BACKEND = """\
+The memcached backend requires either pylibmc or python-memcached.\
+"""
+
+UNKNOWN_BACKEND = """\
+The cache backend {0!r} is unknown,
+Please use one of the following backends instead: {1}\
+"""
 
 
 def import_best_memcache():
@@ -20,15 +37,13 @@ def import_best_memcache():
             try:
                 import memcache  # noqa
             except ImportError:
-                raise ImproperlyConfigured(
-                        "Memcached backend requires either the 'pylibmc' "
-                        "or 'memcache' library")
+                raise ImproperlyConfigured(REQUIRES_BACKEND)
         _imp[0] = (is_pylibmc, memcache)
     return _imp[0]
 
 
 def get_best_memcache(*args, **kwargs):
-    behaviors = kwargs.pop("behaviors", None)
+    behaviors = kwargs.pop('behaviors', None)
     is_pylibmc, memcache = import_best_memcache()
     client = memcache.Client(*args, **kwargs)
     if is_pylibmc and behaviors is not None:
@@ -58,10 +73,10 @@ class DummyClient(object):
         return self.cache.incr(key, delta)
 
 
-backends = {"memcache": lambda: get_best_memcache,
-            "memcached": lambda: get_best_memcache,
-            "pylibmc": lambda: get_best_memcache,
-            "memory": lambda: DummyClient}
+backends = {'memcache': lambda: get_best_memcache,
+            'memcached': lambda: get_best_memcache,
+            'pylibmc': lambda: get_best_memcache,
+            'memory': lambda: DummyClient}
 
 
 class CacheBackend(KeyValueStoreBackend):
@@ -70,23 +85,21 @@ class CacheBackend(KeyValueStoreBackend):
     implements_incr = True
 
     def __init__(self, expires=None, backend=None, options={}, **kwargs):
-        super(CacheBackend, self).__init__(self, **kwargs)
+        super(CacheBackend, self).__init__(**kwargs)
 
         self.options = dict(self.app.conf.CELERY_CACHE_BACKEND_OPTIONS,
                             **options)
 
         self.backend = backend or self.app.conf.CELERY_CACHE_BACKEND
         if self.backend:
-            self.backend, _, servers = self.backend.partition("://")
-            self.servers = servers.rstrip('/').split(";")
+            self.backend, _, servers = self.backend.partition('://')
+            self.servers = servers.rstrip('/').split(';')
         self.expires = self.prepare_expires(expires, type=int)
         try:
             self.Client = backends[self.backend]()
         except KeyError:
-            raise ImproperlyConfigured(
-                    "Unknown cache backend: %s. Please use one of the "
-                    "following backends: %s" % (self.backend,
-                                                ", ".join(backends.keys())))
+            raise ImproperlyConfigured(UNKNOWN_BACKEND.format(
+                self.backend, ', '.join(backends)))
 
     def get(self, key):
         return self.client.get(key)
@@ -100,8 +113,9 @@ class CacheBackend(KeyValueStoreBackend):
     def delete(self, key):
         return self.client.delete(key)
 
-    def on_chord_apply(self, setid, body, result=None, **kwargs):
-        self.client.set(self.get_key_for_chord(setid), '0', time=86400)
+    def on_chord_apply(self, group_id, body, result=None, **kwargs):
+        self.client.set(self.get_key_for_chord(group_id), '0', time=86400)
+        self.save_group(group_id, self.app.GroupResult(group_id, result))
 
     def incr(self, key):
         return self.client.incr(key)
@@ -111,8 +125,8 @@ class CacheBackend(KeyValueStoreBackend):
         return self.Client(self.servers, **self.options)
 
     def __reduce__(self, args=(), kwargs={}):
-        servers = ";".join(self.servers)
-        backend = "%s://%s/" % (self.backend, servers)
+        servers = ';'.join(self.servers)
+        backend = '{0}://{1}/'.format(self.backend, servers)
         kwargs.update(
             dict(backend=backend,
                  expires=self.expires,

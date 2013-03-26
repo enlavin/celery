@@ -8,26 +8,26 @@
     This includes the currently active and reserved tasks,
     statistics, and revoked tasks.
 
-    :copyright: (c) 2009 - 2012 by Ask Solem.
-    :license: BSD, see LICENSE for more details.
-
 """
 from __future__ import absolute_import
 
 import os
+import sys
 import platform
 import shelve
 
 from collections import defaultdict
 
+from kombu.utils import cached_property
+
 from celery import __version__
+from celery.exceptions import SystemTerminate
 from celery.datastructures import LimitedSet
-from celery.utils import cached_property
 
 #: Worker software/platform information.
-SOFTWARE_INFO = {"sw_ident": "celeryd",
-                 "sw_ver": __version__,
-                 "sw_sys": platform.system()}
+SOFTWARE_INFO = {'sw_ident': 'py-celery',
+                 'sw_ver': __version__,
+                 'sw_sys': platform.system()}
 
 #: maximum number of revokes to keep in memory.
 REVOKES_MAX = 10000
@@ -42,8 +42,8 @@ reserved_requests = set()
 #: set of currently active :class:`~celery.worker.job.Request`'s.
 active_requests = set()
 
-#: count of tasks executed by the worker, sorted by type.
-total_count = defaultdict(lambda: 0)
+#: count of tasks accepted by the worker, sorted by type.
+total_count = defaultdict(int)
 
 #: the list of currently revoked tasks.  Persistent if statedb set.
 revoked = LimitedSet(maxlen=REVOKES_MAX, expires=REVOKE_EXPIRES)
@@ -53,6 +53,13 @@ task_reserved = reserved_requests.add
 
 should_stop = False
 should_terminate = False
+
+
+def maybe_shutdown():
+    if should_stop:
+        raise SystemExit()
+    elif should_terminate:
+        raise SystemTerminate()
 
 
 def task_accepted(request):
@@ -67,7 +74,9 @@ def task_ready(request):
     reserved_requests.discard(request)
 
 
-C_BENCH = os.environ.get("C_BENCH") or os.environ.get("CELERY_BENCH")
+C_BENCH = os.environ.get('C_BENCH') or os.environ.get('CELERY_BENCH')
+C_BENCH_EVERY = int(os.environ.get('C_BENCH_EVERY') or
+                    os.environ.get('CELERY_BENCH_EVERY') or 1000)
 if C_BENCH:  # pragma: no cover
     import atexit
 
@@ -79,7 +88,7 @@ if C_BENCH:  # pragma: no cover
     bench_first = None
     bench_start = None
     bench_last = None
-    bench_every = int(os.environ.get("CELERY_BENCH_EVERY", 1000))
+    bench_every = C_BENCH_EVERY
     bench_sample = []
     __reserved = task_reserved
     __ready = task_ready
@@ -88,9 +97,10 @@ if C_BENCH:  # pragma: no cover
         @atexit.register
         def on_shutdown():
             if bench_first is not None and bench_last is not None:
-                print("- Time spent in benchmark: %r" % (
-                    bench_last - bench_first))
-                print("- Avg: %s" % (sum(bench_sample) / len(bench_sample)))
+                print('- Time spent in benchmark: {0!r}'.format(
+                      bench_last - bench_first))
+                print('- Avg: {0}'.format(
+                      sum(bench_sample) / len(bench_sample)))
                 memdump()
 
     def task_reserved(request):  # noqa
@@ -104,7 +114,6 @@ if C_BENCH:  # pragma: no cover
 
         return __reserved(request)
 
-    import sys
     def task_ready(request):  # noqa
         global all_count
         global bench_start
@@ -113,8 +122,8 @@ if C_BENCH:  # pragma: no cover
         if not all_count % bench_every:
             now = time()
             diff = now - bench_start
-            print("- Time spent processing %s tasks (since first "
-                    "task received): ~%.4fs\n" % (bench_every, diff))
+            print('- Time spent processing {0} tasks (since first '
+                  'task received): ~{1:.4f}s\n'.format(bench_every, diff))
             sys.stdout.flush()
             bench_start = bench_last = now
             bench_sample.append(diff)
@@ -123,11 +132,18 @@ if C_BENCH:  # pragma: no cover
 
 
 class Persistent(object):
+    """This is the persistent data stored by the worker when
+    :option:`--statedb` is enabled.
+
+    It currently only stores revoked task id's.
+
+    """
     storage = shelve
     _is_open = False
 
-    def __init__(self, filename):
+    def __init__(self, filename, clock=None):
         self.filename = filename
+        self.clock = clock
         self._load()
 
     def save(self):
@@ -136,13 +152,17 @@ class Persistent(object):
         self.close()
 
     def merge(self, d):
-        revoked.update(d.get("revoked") or {})
+        revoked.update(d.get('revoked') or {})
+        if self.clock:
+            d['clock'] = self.clock.adjust(d.get('clock') or 0)
         return d
 
     def sync(self, d):
-        prev = d.get("revoked") or {}
+        prev = d.get('revoked') or {}
         prev.update(revoked.as_dict())
-        d["revoked"] = prev
+        d['revoked'] = prev
+        if self.clock:
+            d['clock'] = self.clock.forward()
         return d
 
     def open(self):

@@ -1,5 +1,4 @@
 from __future__ import absolute_import
-from __future__ import with_statement
 
 import os
 import sys
@@ -13,26 +12,25 @@ from celery.concurrency.gevent import (
     TaskPool,
 )
 
-from celery.tests.utils import Case, mock_module, patch_many
+from celery.tests.utils import Case, mock_module, patch_many, skip_if_pypy
 gevent_modules = (
-    "gevent",
-    "gevent.monkey",
-    "gevent.greenlet",
-    "gevent.pool",
-    "greenlet",
+    'gevent',
+    'gevent.monkey',
+    'gevent.greenlet',
+    'gevent.pool',
+    'greenlet',
 )
 
 
 class GeventCase(Case):
 
+    @skip_if_pypy
     def setUp(self):
-        if getattr(sys, "pypy_version_info", None):
-            raise SkipTest("Does not work on PyPy")
         try:
-            self.eventlet = __import__("gevent")
+            self.gevent = __import__('gevent')
         except ImportError:
             raise SkipTest(
-                "gevent not installed, skipping related tests.")
+                'gevent not installed, skipping related tests.')
 
 
 class test_gevent_patch(GeventCase):
@@ -40,17 +38,19 @@ class test_gevent_patch(GeventCase):
     def test_is_patched(self):
         with mock_module(*gevent_modules):
             monkey_patched = []
+            import gevent
             from gevent import monkey
+            gevent.version_info = (1, 0, 0)
             prev_monkey_patch = monkey.patch_all
             monkey.patch_all = lambda: monkey_patched.append(True)
-            prev_gevent = sys.modules.pop("celery.concurrency.gevent", None)
-            os.environ.pop("GEVENT_NOPATCH")
+            prev_gevent = sys.modules.pop('celery.concurrency.gevent', None)
+            os.environ.pop('GEVENT_NOPATCH')
             try:
                 import celery.concurrency.gevent  # noqa
                 self.assertTrue(monkey_patched)
             finally:
-                sys.modules["celery.concurrency.gevent"] = prev_gevent
-                os.environ["GEVENT_NOPATCH"] = "yes"
+                sys.modules['celery.concurrency.gevent'] = prev_gevent
+                os.environ['GEVENT_NOPATCH'] = 'yes'
                 monkey.patch_all = prev_monkey_patch
 
 
@@ -58,9 +58,9 @@ class test_Schedule(Case):
 
     def test_sched(self):
         with mock_module(*gevent_modules):
-            with patch_many("gevent.greenlet",
-                    "gevent.greenlet.GreenletExit") as (greenlet,
-                                                        GreenletExit):
+            with patch_many('gevent.greenlet',
+                            'gevent.greenlet.GreenletExit') as (greenlet,
+                                                                GreenletExit):
                 greenlet.Greenlet = object
                 x = Schedule()
                 greenlet.Greenlet = Mock()
@@ -85,7 +85,7 @@ class test_TasKPool(Case):
 
     def test_pool(self):
         with mock_module(*gevent_modules):
-            with patch_many("gevent.spawn_raw", "gevent.pool.Pool") as (
+            with patch_many('gevent.spawn_raw', 'gevent.pool.Pool') as (
                     spawn_raw, Pool):
                 x = TaskPool()
                 x.on_start()
@@ -111,9 +111,10 @@ class test_TasKPool(Case):
 class test_Timer(Case):
 
     def test_timer(self):
-        x = Timer()
-        x.ensure_started()
-        x.schedule = Mock()
-        x.start()
-        x.stop()
-        x.schedule.clear.assert_called_with()
+        with mock_module(*gevent_modules):
+            x = Timer()
+            x.ensure_started()
+            x.schedule = Mock()
+            x.start()
+            x.stop()
+            x.schedule.clear.assert_called_with()

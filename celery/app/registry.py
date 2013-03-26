@@ -5,15 +5,16 @@
 
     Registry of available tasks.
 
-    :copyright: (c) 2009 - 2012 by Ask Solem.
-    :license: BSD, see LICENSE for more details.
-
 """
 from __future__ import absolute_import
 
 import inspect
 
+from importlib import import_module
+
+from celery._state import get_current_app
 from celery.exceptions import NotRegistered
+from celery.five import items
 
 
 class TaskRegistry(dict):
@@ -42,22 +43,27 @@ class TaskRegistry(dict):
 
         """
         try:
-            self.pop(getattr(name, "name", name))
+            self.pop(getattr(name, 'name', name))
         except KeyError:
             raise self.NotRegistered(name)
 
-    # -- these methods are irrelevant now and will be removed in 3.0
+    # -- these methods are irrelevant now and will be removed in 4.0
     def regular(self):
-        return self.filter_types("regular")
+        return self.filter_types('regular')
 
     def periodic(self):
-        return self.filter_types("periodic")
+        return self.filter_types('periodic')
 
     def filter_types(self, type):
-        return dict((name, task) for name, task in self.iteritems()
-                                    if task.type == type)
+        return dict((name, task) for name, task in items(self)
+                    if getattr(task, 'type', 'regular') == type)
 
 
 def _unpickle_task(name):
-    from celery import current_app
-    return current_app.tasks[name]
+    return get_current_app().tasks[name]
+
+
+def _unpickle_task_v2(name, module=None):
+    if module:
+        import_module(module)
+    return get_current_app().tasks[name]

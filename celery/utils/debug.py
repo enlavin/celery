@@ -1,9 +1,16 @@
 # -*- coding: utf-8 -*-
+"""
+    celery.utils.debug
+    ~~~~~~~~~~~~~~~~~~
+
+    Utilities for debugging memory usage.
+
+"""
 from __future__ import absolute_import
 
 import os
 
-from .compat import format_d
+from celery.five import format_d, range
 
 try:
     from psutil import Process
@@ -32,16 +39,16 @@ def memdump(samples=10):
 
     """
     if ps() is None:
-        print("- rss: (psutil not installed).")
+        print('- rss: (psutil not installed).')
         return
-    if filter(None, _mem_sample):
-        print("- rss (sample):")
+    if any(_mem_sample):
+        print('- rss (sample):')
         for mem in sample(_mem_sample, samples):
-            print("-    > %s," % mem)
+            print('-    > {0},'.format(mem))
         _mem_sample[:] = []
     import gc
     gc.collect()
-    print("- rss (end): %s." % (mem_rss()))
+    print('- rss (end): {0}.'.format(mem_rss()))
 
 
 def sample(x, n, k=0):
@@ -54,7 +61,7 @@ def sample(x, n, k=0):
 
     """
     j = len(x) // n
-    for _ in xrange(n):
+    for _ in range(n):
         yield x[k]
         k += j
 
@@ -63,7 +70,7 @@ def mem_rss():
     """Returns RSS memory usage as a humanized string."""
     p = ps()
     if p is not None:
-        return "%sMB" % (format_d(p.get_memory_info().rss // 1024), )
+        return '{0}MB'.format(format_d(p.get_memory_info().rss // 1024))
 
 
 def ps():

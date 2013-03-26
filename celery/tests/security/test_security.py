@@ -1,7 +1,9 @@
 """
 Keys and certificates for tests (KEY1 is a private key of CERT1, etc.)
 
-Generated with::
+Generated with:
+
+.. code-block:: bash
 
     $ openssl genrsa -des3 -passout pass:test -out key1.key 1024
     $ openssl req -new -key key1.key -out key1.csr -passin pass:test
@@ -13,14 +15,12 @@ Generated with::
 
 """
 from __future__ import absolute_import
-from __future__ import with_statement
-
-import __builtin__
 
 from mock import Mock, patch
 
 from celery import current_app
 from celery.exceptions import ImproperlyConfigured
+from celery.five import builtins
 from celery.security import setup_security, disable_untrusted_serializers
 from kombu.serialization import registry
 
@@ -39,7 +39,7 @@ class test_security(SecurityCase):
         self.assertEqual(0, len(disabled))
 
         disable_untrusted_serializers(
-                ['application/json', 'application/x-python-serialize'])
+            ['application/json', 'application/x-python-serialize'])
         self.assertIn('application/x-yaml', disabled)
         self.assertNotIn('application/json', disabled)
         self.assertNotIn('application/x-python-serialize', disabled)
@@ -60,37 +60,37 @@ class test_security(SecurityCase):
         self.assertIn('application/x-python-serialize', disabled)
         disabled.clear()
 
-    @patch("celery.security.register_auth")
-    @patch("celery.security.disable_untrusted_serializers")
-    def test_setup_registry_complete(self, dis, reg, key="KEY", cert="CERT"):
+    @patch('celery.security.register_auth')
+    @patch('celery.security.disable_untrusted_serializers')
+    def test_setup_registry_complete(self, dis, reg, key='KEY', cert='CERT'):
         calls = [0]
 
         def effect(*args):
             try:
                 m = Mock()
-                m.read.return_value = "B" if calls[0] else "A"
+                m.read.return_value = 'B' if calls[0] else 'A'
                 return m
             finally:
                 calls[0] += 1
 
         with mock_open(side_effect=effect):
             store = Mock()
-            setup_security(["json"], key, cert, store)
-            dis.assert_called_with(["json"])
-            reg.assert_called_with("A", "B", store)
+            setup_security(['json'], key, cert, store)
+            dis.assert_called_with(['json'])
+            reg.assert_called_with('A', 'B', store, 'sha1', 'json')
 
     def test_security_conf(self):
         current_app.conf.CELERY_TASK_SERIALIZER = 'auth'
 
         self.assertRaises(ImproperlyConfigured, setup_security)
 
-        _import = __builtin__.__import__
+        _import = builtins.__import__
 
         def import_hook(name, *args, **kwargs):
             if name == 'OpenSSL':
                 raise ImportError
             return _import(name, *args, **kwargs)
 
-        __builtin__.__import__ = import_hook
+        builtins.__import__ = import_hook
         self.assertRaises(ImproperlyConfigured, setup_security)
-        __builtin__.__import__ = _import
+        builtins.__import__ = _import

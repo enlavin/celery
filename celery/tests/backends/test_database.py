@@ -1,7 +1,4 @@
-from __future__ import absolute_import
-from __future__ import with_statement
-
-import sys
+from __future__ import absolute_import, unicode_literals
 
 from datetime import datetime
 
@@ -14,12 +11,17 @@ from celery.exceptions import ImproperlyConfigured
 from celery.result import AsyncResult
 from celery.utils import uuid
 
-from celery.tests.utils import Case, mask_modules
+from celery.tests.utils import (
+    Case,
+    mask_modules,
+    skip_if_pypy,
+    skip_if_jython,
+)
 
 try:
     import sqlalchemy  # noqa
 except ImportError:
-    DatabaseBackend = Task = TaskSet = None
+    DatabaseBackend = Task = TaskSet = None  # noqa
 else:
     from celery.backends.database import DatabaseBackend
     from celery.backends.database.models import Task, TaskSet
@@ -33,36 +35,17 @@ class SomeClass(object):
 
 class test_DatabaseBackend(Case):
 
+    @skip_if_pypy
+    @skip_if_jython
     def setUp(self):
-        if sys.platform.startswith("java"):
-            raise SkipTest("SQLite not available on Jython")
-        if hasattr(sys, "pypy_version_info"):
-            raise SkipTest("Known to not pass on PyPy")
         if DatabaseBackend is None:
-            raise SkipTest("sqlalchemy not installed")
+            raise SkipTest('sqlalchemy not installed')
 
     def test_missing_SQLAlchemy_raises_ImproperlyConfigured(self):
-        with mask_modules("sqlalchemy"):
+        with mask_modules('sqlalchemy'):
             from celery.backends.database import _sqlalchemy_installed
             with self.assertRaises(ImproperlyConfigured):
                 _sqlalchemy_installed()
-
-    def test_pickle_hack_for_sqla_05(self):
-        import sqlalchemy as sa
-        from celery.backends.database import session
-        prev_base = session.ResultModelBase
-        prev_ver, sa.__version__ = sa.__version__, "0.5.0"
-        prev_models = sys.modules.pop("celery.backends.database.models", None)
-        try:
-            from sqlalchemy.ext.declarative import declarative_base
-            session.ResultModelBase = declarative_base()
-            from celery.backends.database.dfd042c7 import PickleType as Type1
-            from celery.backends.database.models import PickleType as Type2
-            self.assertIs(Type1, Type2)
-        finally:
-            sys.modules["celery.backends.database.models"] = prev_models
-            sa.__version__ = prev_ver
-            session.ResultModelBase = prev_base
 
     def test_missing_dburi_raises_ImproperlyConfigured(self):
         conf = app_or_default().conf
@@ -75,16 +58,16 @@ class test_DatabaseBackend(Case):
 
     def test_missing_task_id_is_PENDING(self):
         tb = DatabaseBackend()
-        self.assertEqual(tb.get_status("xxx-does-not-exist"), states.PENDING)
+        self.assertEqual(tb.get_status('xxx-does-not-exist'), states.PENDING)
 
     def test_missing_task_meta_is_dict_with_pending(self):
         tb = DatabaseBackend()
         self.assertDictContainsSubset({
             'status': states.PENDING,
-            'task_id': "xxx-does-not-exist-at-all",
+            'task_id': 'xxx-does-not-exist-at-all',
             'result': None,
-            'traceback': None,
-            }, tb.get_task_meta("xxx-does-not-exist-at-all"))
+            'traceback': None
+        }, tb.get_task_meta('xxx-does-not-exist-at-all'))
 
     def test_mark_as_done(self):
         tb = DatabaseBackend()
@@ -102,12 +85,12 @@ class test_DatabaseBackend(Case):
         tb = DatabaseBackend()
 
         tid2 = uuid()
-        result = {"foo": "baz", "bar": SomeClass(12345)}
+        result = {'foo': 'baz', 'bar': SomeClass(12345)}
         tb.mark_as_done(tid2, result)
         # is serialized properly.
         rindb = tb.get_result(tid2)
-        self.assertEqual(rindb.get("foo"), "baz")
-        self.assertEqual(rindb.get("bar").data, 12345)
+        self.assertEqual(rindb.get('foo'), 'baz')
+        self.assertEqual(rindb.get('bar').data, 12345)
 
     def test_mark_as_started(self):
         tb = DatabaseBackend()
@@ -125,34 +108,34 @@ class test_DatabaseBackend(Case):
         tb = DatabaseBackend()
         tid = uuid()
         try:
-            raise KeyError("foo")
-        except KeyError, exception:
+            raise KeyError('foo')
+        except KeyError as exception:
             import traceback
-            trace = "\n".join(traceback.format_stack())
+            trace = '\n'.join(traceback.format_stack())
             tb.mark_as_retry(tid, exception, traceback=trace)
-        self.assertEqual(tb.get_status(tid), states.RETRY)
-        self.assertIsInstance(tb.get_result(tid), KeyError)
-        self.assertEqual(tb.get_traceback(tid), trace)
+            self.assertEqual(tb.get_status(tid), states.RETRY)
+            self.assertIsInstance(tb.get_result(tid), KeyError)
+            self.assertEqual(tb.get_traceback(tid), trace)
 
     def test_mark_as_failure(self):
         tb = DatabaseBackend()
 
         tid3 = uuid()
         try:
-            raise KeyError("foo")
-        except KeyError, exception:
+            raise KeyError('foo')
+        except KeyError as exception:
             import traceback
-            trace = "\n".join(traceback.format_stack())
+            trace = '\n'.join(traceback.format_stack())
             tb.mark_as_failure(tid3, exception, traceback=trace)
-        self.assertEqual(tb.get_status(tid3), states.FAILURE)
-        self.assertIsInstance(tb.get_result(tid3), KeyError)
-        self.assertEqual(tb.get_traceback(tid3), trace)
+            self.assertEqual(tb.get_status(tid3), states.FAILURE)
+            self.assertIsInstance(tb.get_result(tid3), KeyError)
+            self.assertEqual(tb.get_traceback(tid3), trace)
 
     def test_forget(self):
-        tb = DatabaseBackend(backend="memory://")
+        tb = DatabaseBackend(backend='memory://')
         tid = uuid()
-        tb.mark_as_done(tid, {"foo": "bar"})
-        tb.mark_as_done(tid, {"foo": "bar"})
+        tb.mark_as_done(tid, {'foo': 'bar'})
+        tb.mark_as_done(tid, {'foo': 'bar'})
         x = AsyncResult(tid, backend=tb)
         x.forget()
         self.assertIsNone(x.result)
@@ -165,26 +148,26 @@ class test_DatabaseBackend(Case):
         tb = DatabaseBackend()
         self.assertTrue(loads(dumps(tb)))
 
-    def test_save__restore__delete_taskset(self):
+    def test_save__restore__delete_group(self):
         tb = DatabaseBackend()
 
         tid = uuid()
-        res = {u"something": "special"}
-        self.assertEqual(tb.save_taskset(tid, res), res)
+        res = {'something': 'special'}
+        self.assertEqual(tb.save_group(tid, res), res)
 
-        res2 = tb.restore_taskset(tid)
+        res2 = tb.restore_group(tid)
         self.assertEqual(res2, res)
 
-        tb.delete_taskset(tid)
-        self.assertIsNone(tb.restore_taskset(tid))
+        tb.delete_group(tid)
+        self.assertIsNone(tb.restore_group(tid))
 
-        self.assertIsNone(tb.restore_taskset("xxx-nonexisting-id"))
+        self.assertIsNone(tb.restore_group('xxx-nonexisting-id'))
 
     def test_cleanup(self):
         tb = DatabaseBackend()
         for i in range(10):
             tb.mark_as_done(uuid(), 42)
-            tb.save_taskset(uuid(), {"foo": "bar"})
+            tb.save_group(uuid(), {'foo': 'bar'})
         s = tb.ResultSession()
         for t in s.query(Task).all():
             t.date_done = datetime.now() - tb.expires * 2
@@ -196,7 +179,7 @@ class test_DatabaseBackend(Case):
         tb.cleanup()
 
     def test_Task__repr__(self):
-        self.assertIn("foo", repr(Task("foo")))
+        self.assertIn('foo', repr(Task('foo')))
 
     def test_TaskSet__repr__(self):
-        self.assertIn("foo", repr(TaskSet("foo", None)))
+        self.assertIn('foo', repr(TaskSet('foo', None)))

@@ -8,11 +8,10 @@ sys.path.insert(0, os.getcwd())
 sys.path.insert(0, os.path.join(os.getcwd(), os.pardir))
 import suite
 
+from celery.five import range
 from celery.tests.utils import unittest
 from celery.tests.functional import tasks
 from celery.tests.functional.case import WorkerCase
-
-from celery.task.control import broadcast
 
 
 class test_basic(WorkerCase):
@@ -23,7 +22,7 @@ class test_basic(WorkerCase):
     def test_roundtrip_simple_task(self):
         publisher = tasks.add.get_publisher()
         results = [(tasks.add.apply_async(i, publisher=publisher), i)
-                        for i in zip(xrange(100), xrange(100))]
+                        for i in zip(range(100), range(100))]
         for result, i in results:
             self.assertEqual(result.get(timeout=10), operator.add(*i))
 
@@ -35,8 +34,8 @@ class test_basic(WorkerCase):
         self.assertTrue(active)
         active = active[self.worker.hostname]
         self.assertEqual(len(active), 2)
-        self.assertEqual(active[0]["name"], tasks.sleeptask.name)
-        self.assertEqual(active[0]["args"], [sleep])
+        self.assertEqual(active[0]['name'], tasks.sleeptask.name)
+        self.assertEqual(active[0]['args'], [sleep])
 
     def test_dump_reserved(self, sleep=1):
         r1 = tasks.sleeptask.delay(sleep)
@@ -47,8 +46,8 @@ class test_basic(WorkerCase):
         reserved = self.inspect().reserved(safe=True)
         self.assertTrue(reserved)
         reserved = reserved[self.worker.hostname]
-        self.assertEqual(reserved[0]["name"], tasks.sleeptask.name)
-        self.assertEqual(reserved[0]["args"], [sleep])
+        self.assertEqual(reserved[0]['name'], tasks.sleeptask.name)
+        self.assertEqual(reserved[0]['args'], [sleep])
 
     def test_dump_schedule(self, countdown=1):
         r1 = tasks.add.apply_async((2, 2), countdown=countdown)
@@ -58,9 +57,9 @@ class test_basic(WorkerCase):
         self.assertTrue(schedule)
         schedule = schedule[self.worker.hostname]
         self.assertTrue(len(schedule), 2)
-        self.assertEqual(schedule[0]["request"]["name"], tasks.add.name)
-        self.assertEqual(schedule[0]["request"]["args"], [2, 2])
+        self.assertEqual(schedule[0]['request']['name'], tasks.add.name)
+        self.assertEqual(schedule[0]['request']['args'], [2, 2])
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

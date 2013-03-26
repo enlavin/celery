@@ -1,5 +1,4 @@
 from __future__ import absolute_import
-from __future__ import with_statement
 
 import sys
 import types
@@ -8,17 +7,21 @@ from mock import Mock
 from nose import SkipTest
 
 from celery import current_app
-from celery.result import AsyncResult, TaskSetResult
+from celery.five import items, range
+from celery.result import AsyncResult, GroupResult
 from celery.utils import serialization
 from celery.utils.serialization import subclass_exception
 from celery.utils.serialization import \
-        find_nearest_pickleable_exception as fnpe
+    find_nearest_pickleable_exception as fnpe
 from celery.utils.serialization import UnpickleableExceptionWrapper
 from celery.utils.serialization import get_pickleable_exception as gpe
 
 from celery import states
-from celery.backends.base import BaseBackend, KeyValueStoreBackend
-from celery.backends.base import BaseDictBackend, DisabledBackend
+from celery.backends.base import (
+    BaseBackend,
+    KeyValueStoreBackend,
+    DisabledBackend,
+)
 from celery.utils import uuid
 
 from celery.tests.utils import Case
@@ -32,84 +35,39 @@ class wrapobject(object):
 if sys.version_info >= (3, 0):
     Oldstyle = None
 else:
-    Oldstyle = types.ClassType("Oldstyle", (), {})
-Unpickleable = subclass_exception("Unpickleable", KeyError, "foo.module")
-Impossible = subclass_exception("Impossible", object, "foo.module")
-Lookalike = subclass_exception("Lookalike", wrapobject, "foo.module")
+    Oldstyle = types.ClassType('Oldstyle', (), {})
+Unpickleable = subclass_exception('Unpickleable', KeyError, 'foo.module')
+Impossible = subclass_exception('Impossible', object, 'foo.module')
+Lookalike = subclass_exception('Lookalike', wrapobject, 'foo.module')
 b = BaseBackend()
 
 
 class test_serialization(Case):
 
     def test_create_exception_cls(self):
-        self.assertTrue(serialization.create_exception_cls("FooError", "m"))
-        self.assertTrue(serialization.create_exception_cls("FooError",
-                                                            "m",
-                                                            KeyError))
+        self.assertTrue(serialization.create_exception_cls('FooError', 'm'))
+        self.assertTrue(serialization.create_exception_cls('FooError', 'm',
+                                                           KeyError))
 
 
 class test_BaseBackend_interface(Case):
 
-    def test_get_status(self):
-        with self.assertRaises(NotImplementedError):
-            b.get_status("SOMExx-N0Nex1stant-IDxx-")
-
     def test__forget(self):
         with self.assertRaises(NotImplementedError):
-            b.forget("SOMExx-N0Nex1stant-IDxx-")
-
-    def test_get_children(self):
-        with self.assertRaises(NotImplementedError):
-            b.get_children("SOMExx-N0Nex1stant-IDxx-")
-
-    def test_store_result(self):
-        with self.assertRaises(NotImplementedError):
-            b.store_result("SOMExx-N0nex1stant-IDxx-", 42, states.SUCCESS)
-
-    def test_mark_as_started(self):
-        with self.assertRaises(NotImplementedError):
-            b.mark_as_started("SOMExx-N0nex1stant-IDxx-")
-
-    def test_reload_task_result(self):
-        with self.assertRaises(NotImplementedError):
-            b.reload_task_result("SOMExx-N0nex1stant-IDxx-")
-
-    def test_reload_taskset_result(self):
-        with self.assertRaises(NotImplementedError):
-            b.reload_taskset_result("SOMExx-N0nex1stant-IDxx-")
-
-    def test_get_result(self):
-        with self.assertRaises(NotImplementedError):
-            b.get_result("SOMExx-N0nex1stant-IDxx-")
-
-    def test_restore_taskset(self):
-        with self.assertRaises(NotImplementedError):
-            b.restore_taskset("SOMExx-N0nex1stant-IDxx-")
-
-    def test_delete_taskset(self):
-        with self.assertRaises(NotImplementedError):
-            b.delete_taskset("SOMExx-N0nex1stant-IDxx-")
-
-    def test_save_taskset(self):
-        with self.assertRaises(NotImplementedError):
-            b.save_taskset("SOMExx-N0nex1stant-IDxx-", "blergh")
-
-    def test_get_traceback(self):
-        with self.assertRaises(NotImplementedError):
-            b.get_traceback("SOMExx-N0nex1stant-IDxx-")
+            b._forget('SOMExx-N0Nex1stant-IDxx-')
 
     def test_forget(self):
         with self.assertRaises(NotImplementedError):
-            b.forget("SOMExx-N0nex1stant-IDxx-")
+            b.forget('SOMExx-N0nex1stant-IDxx-')
 
     def test_on_chord_part_return(self):
         b.on_chord_part_return(None)
 
-    def test_on_chord_apply(self, unlock="celery.chord_unlock"):
+    def test_on_chord_apply(self, unlock='celery.chord_unlock'):
         p, current_app.tasks[unlock] = current_app.tasks.get(unlock), Mock()
         try:
-            b.on_chord_apply("dakj221", "sdokqweok",
-                             result=map(AsyncResult, [1, 2, 3]))
+            b.on_chord_apply('dakj221', 'sdokqweok',
+                             result=[AsyncResult(x) for x in [1, 2, 3]])
             self.assertTrue(current_app.tasks[unlock].apply_async.call_count)
         finally:
             current_app.tasks[unlock] = p
@@ -119,14 +77,14 @@ class test_exception_pickle(Case):
 
     def test_oldstyle(self):
         if Oldstyle is None:
-            raise SkipTest("py3k does not support old style classes")
+            raise SkipTest('py3k does not support old style classes')
         self.assertIsNone(fnpe(Oldstyle()))
 
     def test_BaseException(self):
         self.assertIsNone(fnpe(Exception()))
 
     def test_get_pickleable_exception(self):
-        exc = Exception("foo")
+        exc = Exception('foo')
         self.assertEqual(gpe(exc), exc)
 
     def test_unpickleable(self):
@@ -137,7 +95,7 @@ class test_exception_pickle(Case):
 class test_prepare_exception(Case):
 
     def test_unpickleable(self):
-        x = b.prepare_exception(Unpickleable(1, 2, "foo"))
+        x = b.prepare_exception(Unpickleable(1, 2, 'foo'))
         self.assertIsInstance(x, KeyError)
         y = b.exception_to_python(x)
         self.assertIsInstance(y, KeyError)
@@ -147,14 +105,14 @@ class test_prepare_exception(Case):
         self.assertIsInstance(x, UnpickleableExceptionWrapper)
         self.assertTrue(str(x))
         y = b.exception_to_python(x)
-        self.assertEqual(y.__class__.__name__, "Impossible")
+        self.assertEqual(y.__class__.__name__, 'Impossible')
         if sys.version_info < (2, 5):
             self.assertTrue(y.__class__.__module__)
         else:
-            self.assertEqual(y.__class__.__module__, "foo.module")
+            self.assertEqual(y.__class__.__module__, 'foo.module')
 
     def test_regular(self):
-        x = b.prepare_exception(KeyError("baz"))
+        x = b.prepare_exception(KeyError('baz'))
         self.assertIsInstance(x, KeyError)
         y = b.exception_to_python(x)
         self.assertIsInstance(y, KeyError)
@@ -165,7 +123,7 @@ class KVBackend(KeyValueStoreBackend):
 
     def __init__(self, *args, **kwargs):
         self.db = {}
-        super(KVBackend, self).__init__(KeyValueStoreBackend)
+        super(KVBackend, self).__init__()
 
     def get(self, key):
         return self.db.get(key)
@@ -183,69 +141,68 @@ class KVBackend(KeyValueStoreBackend):
         self.db.pop(key, None)
 
 
-class DictBackend(BaseDictBackend):
+class DictBackend(BaseBackend):
 
     def __init__(self, *args, **kwargs):
-        BaseDictBackend.__init__(self, *args, **kwargs)
-        self._data = {"can-delete": {"result": "foo"}}
+        BaseBackend.__init__(self, *args, **kwargs)
+        self._data = {'can-delete': {'result': 'foo'}}
 
-    def _restore_taskset(self, taskset_id):
-        if taskset_id == "exists":
-            return {"result": "taskset"}
+    def _restore_group(self, group_id):
+        if group_id == 'exists':
+            return {'result': 'group'}
 
     def _get_task_meta_for(self, task_id):
-        if task_id == "task-exists":
-            return {"result": "task"}
+        if task_id == 'task-exists':
+            return {'result': 'task'}
 
-    def _delete_taskset(self, taskset_id):
-        self._data.pop(taskset_id, None)
+    def _delete_group(self, group_id):
+        self._data.pop(group_id, None)
 
 
-class test_BaseDictBackend(Case):
+class test_BaseBackend_dict(Case):
 
     def setUp(self):
         self.b = DictBackend()
 
-    def test_delete_taskset(self):
-        self.b.delete_taskset("can-delete")
-        self.assertNotIn("can-delete", self.b._data)
+    def test_delete_group(self):
+        self.b.delete_group('can-delete')
+        self.assertNotIn('can-delete', self.b._data)
 
     def test_prepare_exception_json(self):
-        x = DictBackend(serializer="json")
-        e = x.prepare_exception(KeyError("foo"))
-        self.assertIn("exc_type", e)
+        x = DictBackend(serializer='json')
+        e = x.prepare_exception(KeyError('foo'))
+        self.assertIn('exc_type', e)
         e = x.exception_to_python(e)
-        self.assertEqual(e.__class__.__name__, "KeyError")
+        self.assertEqual(e.__class__.__name__, 'KeyError')
         self.assertEqual(str(e), "'foo'")
 
-    def test_save_taskset(self):
-        b = BaseDictBackend()
-        b._save_taskset = Mock()
-        b.save_taskset("foofoo", "xxx")
-        b._save_taskset.assert_called_with("foofoo", "xxx")
+    def test_save_group(self):
+        b = BaseBackend()
+        b._save_group = Mock()
+        b.save_group('foofoo', 'xxx')
+        b._save_group.assert_called_with('foofoo', 'xxx')
 
     def test_forget_interface(self):
-        b = BaseDictBackend()
+        b = BaseBackend()
         with self.assertRaises(NotImplementedError):
-            b.forget("foo")
+            b.forget('foo')
 
-    def test_restore_taskset(self):
-        self.assertIsNone(self.b.restore_taskset("missing"))
-        self.assertIsNone(self.b.restore_taskset("missing"))
-        self.assertEqual(self.b.restore_taskset("exists"), "taskset")
-        self.assertEqual(self.b.restore_taskset("exists"), "taskset")
-        self.assertEqual(self.b.restore_taskset("exists", cache=False),
-                         "taskset")
+    def test_restore_group(self):
+        self.assertIsNone(self.b.restore_group('missing'))
+        self.assertIsNone(self.b.restore_group('missing'))
+        self.assertEqual(self.b.restore_group('exists'), 'group')
+        self.assertEqual(self.b.restore_group('exists'), 'group')
+        self.assertEqual(self.b.restore_group('exists', cache=False), 'group')
 
-    def test_reload_taskset_result(self):
+    def test_reload_group_result(self):
         self.b._cache = {}
-        self.b.reload_taskset_result("exists")
-        self.b._cache["exists"] = {"result": "taskset"}
+        self.b.reload_group_result('exists')
+        self.b._cache['exists'] = {'result': 'group'}
 
     def test_reload_task_result(self):
         self.b._cache = {}
-        self.b.reload_task_result("task-exists")
-        self.b._cache["task-exists"] = {"result": "task"}
+        self.b.reload_task_result('task-exists')
+        self.b._cache['task-exists'] = {'result': 'task'}
 
 
 class test_KeyValueStoreBackend(Case):
@@ -259,75 +216,75 @@ class test_KeyValueStoreBackend(Case):
 
     def test_get_store_delete_result(self):
         tid = uuid()
-        self.b.mark_as_done(tid, "Hello world")
-        self.assertEqual(self.b.get_result(tid), "Hello world")
+        self.b.mark_as_done(tid, 'Hello world')
+        self.assertEqual(self.b.get_result(tid), 'Hello world')
         self.assertEqual(self.b.get_status(tid), states.SUCCESS)
         self.b.forget(tid)
         self.assertEqual(self.b.get_status(tid), states.PENDING)
 
     def test_strip_prefix(self):
-        x = self.b.get_key_for_task("x1b34")
-        self.assertEqual(self.b._strip_prefix(x), "x1b34")
-        self.assertEqual(self.b._strip_prefix("x1b34"), "x1b34")
+        x = self.b.get_key_for_task('x1b34')
+        self.assertEqual(self.b._strip_prefix(x), 'x1b34')
+        self.assertEqual(self.b._strip_prefix('x1b34'), 'x1b34')
 
     def test_get_many(self):
         for is_dict in True, False:
             self.b.mget_returns_dict = is_dict
-            ids = dict((uuid(), i) for i in xrange(10))
-            for id, i in ids.items():
+            ids = dict((uuid(), i) for i in range(10))
+            for id, i in items(ids):
                 self.b.mark_as_done(id, i)
-            it = self.b.get_many(ids.keys())
+            it = self.b.get_many(list(ids))
             for i, (got_id, got_state) in enumerate(it):
-                self.assertEqual(got_state["result"], ids[got_id])
+                self.assertEqual(got_state['result'], ids[got_id])
             self.assertEqual(i, 9)
-            self.assertTrue(list(self.b.get_many(ids.keys())))
+            self.assertTrue(list(self.b.get_many(list(ids))))
 
     def test_get_missing_meta(self):
-        self.assertIsNone(self.b.get_result("xxx-missing"))
-        self.assertEqual(self.b.get_status("xxx-missing"), states.PENDING)
+        self.assertIsNone(self.b.get_result('xxx-missing'))
+        self.assertEqual(self.b.get_status('xxx-missing'), states.PENDING)
 
-    def test_save_restore_delete_taskset(self):
+    def test_save_restore_delete_group(self):
         tid = uuid()
-        tsr = TaskSetResult(tid, [AsyncResult(uuid()) for _ in range(10)])
-        self.b.save_taskset(tid, tsr)
-        stored = self.b.restore_taskset(tid)
+        tsr = GroupResult(tid, [AsyncResult(uuid()) for _ in range(10)])
+        self.b.save_group(tid, tsr)
+        stored = self.b.restore_group(tid)
         print(stored)
-        self.assertEqual(self.b.restore_taskset(tid), tsr)
-        self.b.delete_taskset(tid)
-        self.assertIsNone(self.b.restore_taskset(tid))
+        self.assertEqual(self.b.restore_group(tid), tsr)
+        self.b.delete_group(tid)
+        self.assertIsNone(self.b.restore_group(tid))
 
-    def test_restore_missing_taskset(self):
-        self.assertIsNone(self.b.restore_taskset("xxx-nonexistant"))
+    def test_restore_missing_group(self):
+        self.assertIsNone(self.b.restore_group('xxx-nonexistant'))
 
 
 class test_KeyValueStoreBackend_interface(Case):
 
     def test_get(self):
         with self.assertRaises(NotImplementedError):
-            KeyValueStoreBackend().get("a")
+            KeyValueStoreBackend().get('a')
 
     def test_set(self):
         with self.assertRaises(NotImplementedError):
-            KeyValueStoreBackend().set("a", 1)
+            KeyValueStoreBackend().set('a', 1)
 
     def test_incr(self):
         with self.assertRaises(NotImplementedError):
-            KeyValueStoreBackend().incr("a")
+            KeyValueStoreBackend().incr('a')
 
     def test_cleanup(self):
         self.assertFalse(KeyValueStoreBackend().cleanup())
 
     def test_delete(self):
         with self.assertRaises(NotImplementedError):
-            KeyValueStoreBackend().delete("a")
+            KeyValueStoreBackend().delete('a')
 
     def test_mget(self):
         with self.assertRaises(NotImplementedError):
-            KeyValueStoreBackend().mget(["a"])
+            KeyValueStoreBackend().mget(['a'])
 
     def test_forget(self):
         with self.assertRaises(NotImplementedError):
-            KeyValueStoreBackend().forget("a")
+            KeyValueStoreBackend().forget('a')
 
 
 class test_DisabledBackend(Case):
@@ -337,4 +294,4 @@ class test_DisabledBackend(Case):
 
     def test_is_disabled(self):
         with self.assertRaises(NotImplementedError):
-            DisabledBackend().get_status("foo")
+            DisabledBackend().get_status('foo')

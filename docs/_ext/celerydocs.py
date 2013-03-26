@@ -14,11 +14,12 @@ APPATTRS = {
     "tasks": "celery.app.registry.Registry",
 
     "AsyncResult": "celery.result.AsyncResult",
-    "TaskSetResult": "celery.result.TaskSetResult",
+    "GroupResult": "celery.result.GroupResult",
     "Worker": "celery.apps.worker.Worker",
     "WorkController": "celery.worker.WorkController",
     "Beat": "celery.apps.beat.Beat",
-    "Task": "celery.app.task.BaseTask",
+    "Task": "celery.app.task.Task",
+    "send_task": "celery.Celery.send_task",
 }
 
 ABBRS = {
@@ -145,4 +146,9 @@ def setup(app):
         directivename="signal",
         rolename="signal",
         indextemplate="pair: %s; signal",
+    )
+    app.add_crossref_type(
+        directivename="event",
+        rolename="event",
+        indextemplate="pair: %s; event",
     )

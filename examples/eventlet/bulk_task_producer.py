@@ -1,4 +1,3 @@
-from __future__ import with_statement
 
 from eventlet import spawn_n, monkey_patch, Timeout
 from eventlet.queue import LightQueue
@@ -45,10 +44,10 @@ class ProducerPool(object):
 
     def _run(self):
         self._producers = [spawn_n(self._producer)
-                                for _ in xrange(self.size)]
+                                for _ in range(self.size)]
 
     def _producer(self):
-        connection = current_app.broker_connection()
+        connection = current_app.connection()
         publisher = current_app.amqp.TaskProducer(connection)
         inqueue = self.inqueue
 

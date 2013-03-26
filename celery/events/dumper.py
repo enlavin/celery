@@ -3,14 +3,11 @@
     celery.events.dumper
     ~~~~~~~~~~~~~~~~~~~~
 
-    THis is a simple program that dumps events to the console
-    as they happen.  Think of it like a `tcpdump` for Celery events.
-
-    :copyright: (c) 2009 - 2012 by Ask Solem.
-    :license: BSD, see LICENSE for more details.
+    This is a simple program that dumps events to the console
+    as they happen. Think of it like a `tcpdump` for Celery events.
 
 """
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 import sys
 
@@ -18,24 +15,25 @@ from datetime import datetime
 
 from celery.app import app_or_default
 from celery.datastructures import LRUCache
-
+from celery.utils.timeutils import humanize_seconds
 
 TASK_NAMES = LRUCache(limit=0xFFF)
 
-HUMAN_TYPES = {"worker-offline": "shutdown",
-               "worker-online": "started",
-               "worker-heartbeat": "heartbeat"}
+HUMAN_TYPES = {'worker-offline': 'shutdown',
+               'worker-online': 'started',
+               'worker-heartbeat': 'heartbeat'}
+
+CONNECTION_ERROR = """\
+-> Cannot connect to %s: %s.
+Trying again %s
+"""
 
 
 def humanize_type(type):
     try:
         return HUMAN_TYPES[type.lower()]
     except KeyError:
-        return type.lower().replace("-", " ")
-
-
-def say(msg, out=sys.stdout):
-    out.write(msg + "\n")
+        return type.lower().replace('-', ' ')
 
 
 class Dumper(object):
@@ -44,47 +42,62 @@ class Dumper(object):
         self.out = out
 
     def say(self, msg):
-        say(msg, out=self.out)
+        print(msg, file=self.out)
 
-    def on_event(self, event):
-        timestamp = datetime.utcfromtimestamp(event.pop("timestamp"))
-        type = event.pop("type").lower()
-        hostname = event.pop("hostname")
-        if type.startswith("task-"):
-            uuid = event.pop("uuid")
-            if type in ("task-received", "task-sent"):
-                task = TASK_NAMES[uuid] = "%s(%s) args=%s kwargs=%s" % (
-                        event.pop("name"), uuid,
-                        event.pop("args"),
-                        event.pop("kwargs"))
+    def on_event(self, ev):
+        timestamp = datetime.utcfromtimestamp(ev.pop('timestamp'))
+        type = ev.pop('type').lower()
+        hostname = ev.pop('hostname')
+        if type.startswith('task-'):
+            uuid = ev.pop('uuid')
+            if type in ('task-received', 'task-sent'):
+                task = TASK_NAMES[uuid] = '{0}({1}) args={2} kwargs={3}' \
+                    .format(ev.pop('name'), uuid,
+                            ev.pop('args'),
+                            ev.pop('kwargs'))
             else:
-                task = TASK_NAMES.get(uuid, "")
+                task = TASK_NAMES.get(uuid, '')
             return self.format_task_event(hostname, timestamp,
-                                          type, task, event)
-        fields = ", ".join("%s=%s" % (key, event[key])
-                        for key in sorted(event.keys()))
-        sep = fields and ":" or ""
-        self.say("%s [%s] %s%s %s" % (hostname, timestamp,
-                                      humanize_type(type), sep, fields))
+                                          type, task, ev)
+        fields = ', '.join(
+            '{0}={1}'.format(key, ev[key]) for key in sorted(ev)
+        )
+        sep = fields and ':' or ''
+        self.say('{0} [{1}] {2}{3} {4}'.format(
+            hostname, timestamp, humanize_type(type), sep, fields),
+        )
 
     def format_task_event(self, hostname, timestamp, type, task, event):
-        fields = ", ".join("%s=%s" % (key, event[key])
-                        for key in sorted(event.keys()))
-        sep = fields and ":" or ""
-        self.say("%s [%s] %s%s %s %s" % (hostname, timestamp,
-                    humanize_type(type), sep, task, fields))
+        fields = ', '.join(
+            '{0}={1}'.format(key, event[key]) for key in sorted(event)
+        )
+        sep = fields and ':' or ''
+        self.say('{0} [{1}] {2}{3} {4} {5}'.format(
+            hostname, timestamp, humanize_type(type), sep, task, fields),
+        )
 
 
 def evdump(app=None, out=sys.stdout):
     app = app_or_default(app)
     dumper = Dumper(out=out)
-    dumper.say("-> evdump: starting capture...")
-    conn = app.broker_connection()
-    recv = app.events.Receiver(conn, handlers={"*": dumper.on_event})
-    try:
-        recv.capture()
-    except (KeyboardInterrupt, SystemExit):
-        conn and conn.close()
+    dumper.say('-> evdump: starting capture...')
+    conn = app.connection()
 
-if __name__ == "__main__":  # pragma: no cover
+    def _error_handler(exc, interval):
+        dumper.say(CONNECTION_ERROR % (
+            conn.as_uri(), exc, humanize_seconds(interval, 'in', ' ')
+        ))
+
+    while 1:
+        try:
+            conn = conn.clone()
+            conn.ensure_connection(_error_handler)
+            recv = app.events.Receiver(conn, handlers={'*': dumper.on_event})
+            recv.capture()
+        except (KeyboardInterrupt, SystemExit):
+            return conn and conn.close()
+        except conn.connection_errors + conn.channel_errors:
+            dumper.say('-> Connection lost, attempting reconnect')
+
+if __name__ == '__main__':  # pragma: no cover
     evdump()

@@ -1,12 +1,7 @@
-from __future__ import absolute_import
-from __future__ import with_statement
+from __future__ import absolute_import, unicode_literals
 
-import sys
-
-from nose import SkipTest
-
+from celery.five import string, long_t
 from celery.local import Proxy, PromiseProxy, maybe_evaluate, try_import
-
 from celery.tests.utils import Case
 
 
@@ -17,7 +12,7 @@ class test_try_import(Case):
 
     def test_when_default(self):
         default = object()
-        self.assertIs(try_import("foobar.awqewqe.asdwqewq", default), default)
+        self.assertIs(try_import('foobar.awqewqe.asdwqewq', default), default)
 
 
 class test_Proxy(Case):
@@ -26,26 +21,27 @@ class test_Proxy(Case):
 
         def real():
             """real function"""
-            return "REAL"
+            return 'REAL'
 
-        x = Proxy(lambda: real, name="xyz")
-        self.assertEqual(x.__name__, "xyz")
+        x = Proxy(lambda: real, name='xyz')
+        self.assertEqual(x.__name__, 'xyz')
 
         y = Proxy(lambda: real)
-        self.assertEqual(y.__name__, "real")
+        self.assertEqual(y.__name__, 'real')
 
-        self.assertEqual(x.__doc__, "real function")
+        self.assertEqual(x.__doc__, 'real function')
 
         self.assertEqual(x.__class__, type(real))
         self.assertEqual(x.__dict__, real.__dict__)
         self.assertEqual(repr(x), repr(real))
 
-    def test_nonzero(self):
+    def test_bool(self):
 
         class X(object):
 
-            def __nonzero__(self):
+            def __bool__(self):
                 return False
+            __nonzero__ = __bool__
 
         x = Proxy(lambda: X())
         self.assertFalse(x)
@@ -64,27 +60,27 @@ class test_Proxy(Case):
         class X(object):
 
             def __unicode__(self):
-                return u"UNICODE"
+                return 'UNICODE'
+            __str__ = __unicode__
 
             def __repr__(self):
-                return "REPR"
+                return 'REPR'
 
         x = Proxy(lambda: X())
-        self.assertEqual(unicode(x), u"UNICODE")
+        self.assertEqual(string(x), 'UNICODE')
         del(X.__unicode__)
-        self.assertEqual(unicode(x), "REPR")
+        del(X.__str__)
+        self.assertEqual(string(x), 'REPR')
 
     def test_dir(self):
-        if sys.version_info < (2, 6):
-            raise SkipTest("Not relevant for Py2.5")
 
         class X(object):
 
             def __dir__(self):
-                return ["a", "b", "c"]
+                return ['a', 'b', 'c']
 
         x = Proxy(lambda: X())
-        self.assertListEqual(dir(x), ["a", "b", "c"])
+        self.assertListEqual(dir(x), ['a', 'b', 'c'])
 
         class Y(object):
 
@@ -94,8 +90,6 @@ class test_Proxy(Case):
         self.assertListEqual(dir(y), [])
 
     def test_getsetdel_attr(self):
-        if sys.version_info < (2, 6):
-            raise SkipTest("Not relevant for Py2.5")
 
         class X(object):
             a = 1
@@ -103,17 +97,17 @@ class test_Proxy(Case):
             c = 3
 
             def __dir__(self):
-                return ["a", "b", "c"]
+                return ['a', 'b', 'c']
 
         v = X()
 
         x = Proxy(lambda: v)
-        self.assertListEqual(x.__members__, ["a", "b", "c"])
+        self.assertListEqual(x.__members__, ['a', 'b', 'c'])
         self.assertEqual(x.a, 1)
         self.assertEqual(x.b, 2)
         self.assertEqual(x.c, 3)
 
-        setattr(x, "a", 10)
+        setattr(x, 'a', 10)
         self.assertEqual(x.a, 10)
 
         del(x.a)
@@ -122,13 +116,13 @@ class test_Proxy(Case):
     def test_dictproxy(self):
         v = {}
         x = Proxy(lambda: v)
-        x["foo"] = 42
-        self.assertEqual(x["foo"], 42)
+        x['foo'] = 42
+        self.assertEqual(x['foo'], 42)
         self.assertEqual(len(x), 1)
-        self.assertIn("foo", x)
-        del(x["foo"])
+        self.assertIn('foo', x)
+        del(x['foo'])
         with self.assertRaises(KeyError):
-            x["foo"]
+            x['foo']
         self.assertTrue(iter(x))
 
     def test_listproxy(self):
@@ -208,7 +202,7 @@ class test_Proxy(Case):
         x = Proxy(lambda: 10)
         self.assertEqual(type(x.__float__()), float)
         self.assertEqual(type(x.__int__()), int)
-        self.assertEqual(type(x.__long__()), long)
+        self.assertEqual(type(x.__long__()), long_t)
         self.assertTrue(hex(x))
         self.assertTrue(oct(x))
 

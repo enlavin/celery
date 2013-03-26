@@ -1,13 +1,23 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
-from __future__ import with_statement
+"""
+    celery.bin.celeryd_detach
+    ~~~~~~~~~~~~~~~~~~~~~~~~~
 
+    Program used to daemonize the worker
+
+    Using :func:`os.execv` because forking and multiprocessing
+    leads to weird issues (it was a long time ago now, but it
+    could have something to do with the threading mutex bug)
+
+"""
+from __future__ import absolute_import
+
+import celery
 import os
 import sys
 
 from optparse import OptionParser, BadOptionError
 
-from celery import __version__
 from celery.platforms import EX_FAILURE, detached
 from celery.utils.log import get_logger
 
@@ -15,10 +25,11 @@ from celery.bin.base import daemon_options, Option
 
 logger = get_logger(__name__)
 
-OPTION_LIST = daemon_options(default_pidfile="celeryd.pid") + (
-                Option("--fake",
-                       default=False, action="store_true", dest="fake",
-                       help="Don't fork (for debugging purposes)"), )
+OPTION_LIST = daemon_options(default_pidfile='celeryd.pid') + (
+    Option('--fake',
+           default=False, action='store_true', dest='fake',
+           help="Don't fork (for debugging purposes)"),
+)
 
 
 def detach(path, argv, logfile=None, pidfile=None, uid=None,
@@ -28,8 +39,8 @@ def detach(path, argv, logfile=None, pidfile=None, uid=None,
             os.execv(path, [path] + argv)
         except Exception:
             from celery import current_app
-            current_app.log.setup_logging_subsystem("ERROR", logfile)
-            logger.critical("Can't exec %r", " ".join([path] + argv),
+            current_app.log.setup_logging_subsystem('ERROR', logfile)
+            logger.critical("Can't exec %r", ' '.join([path] + argv),
                             exc_info=True)
         return EX_FAILURE
 
@@ -43,8 +54,8 @@ class PartialOptionParser(OptionParser):
     def _process_long_opt(self, rargs, values):
         arg = rargs.pop(0)
 
-        if "=" in arg:
-            opt, next_arg = arg.split("=", 1)
+        if '=' in arg:
+            opt, next_arg = arg.split('=', 1)
             rargs.insert(0, next_arg)
             had_explicit_value = True
         else:
@@ -62,10 +73,10 @@ class PartialOptionParser(OptionParser):
                 nargs = option.nargs
                 if len(rargs) < nargs:
                     if nargs == 1:
-                        self.error("%s option requires an argument" % opt)
+                        self.error('{0} requires an argument'.format(opt))
                     else:
-                        self.error("%s option requires %d arguments" % (
-                                    opt, nargs))
+                        self.error('{0} requires {1} arguments'.format(
+                            opt, nargs))
                 elif nargs == 1:
                     value = rargs.pop(0)
                 else:
@@ -73,7 +84,7 @@ class PartialOptionParser(OptionParser):
                     del rargs[0:nargs]
 
             elif had_explicit_value:
-                self.error("%s option does not take a value" % opt)
+                self.error('{0} option does not take a value'.format(opt))
             else:
                 value = None
             option.process(opt, value, values, self)
@@ -86,19 +97,19 @@ class PartialOptionParser(OptionParser):
             OptionParser._process_short_opts(self, rargs, values)
         except BadOptionError:
             self.leftovers.append(arg)
-            if rargs and not rargs[0][0] == "-":
+            if rargs and not rargs[0][0] == '-':
                 self.leftovers.append(rargs.pop(0))
 
 
 class detached_celeryd(object):
     option_list = OPTION_LIST
-    usage = "%prog [options] [celeryd options]"
-    version = __version__
-    description = ("Detaches Celery worker nodes.  See `celeryd --help` "
-                   "for the list of supported worker arguments.")
+    usage = '%prog [options] [celeryd options]'
+    version = celery.VERSION_BANNER
+    description = ('Detaches Celery worker nodes.  See `celery worker --help` '
+                   'for the list of supported worker arguments.')
     command = sys.executable
     execv_path = sys.executable
-    execv_argv = ["-m", "celery.bin.celeryd"]
+    execv_argv = ['-m', 'celery', 'worker']
 
     def Parser(self, prog_name):
         return PartialOptionParser(prog=prog_name,
@@ -111,9 +122,9 @@ class detached_celeryd(object):
         parser = self.Parser(prog_name)
         options, values = parser.parse_args(argv)
         if options.logfile:
-            parser.leftovers.append("--logfile=%s" % (options.logfile, ))
+            parser.leftovers.append('--logfile={0}'.format(options.logfile))
         if options.pidfile:
-            parser.leftovers.append("--pidfile=%s" % (options.pidfile, ))
+            parser.leftovers.append('--pidfile={0}'.format(options.pidfile))
         return options, values, parser.leftovers
 
     def execute_from_commandline(self, argv=None):
@@ -125,18 +136,18 @@ class detached_celeryd(object):
             if seen_cargs:
                 config.append(arg)
             else:
-                if arg == "--":
+                if arg == '--':
                     seen_cargs = 1
                     config.append(arg)
         prog_name = os.path.basename(argv[0])
         options, values, leftovers = self.parse_options(prog_name, argv[1:])
         sys.exit(detach(path=self.execv_path,
                  argv=self.execv_argv + leftovers + config,
-                  **vars(options)))
+                 **vars(options)))
 
 
 def main():
     detached_celeryd().execute_from_commandline()
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == '__main__':  # pragma: no cover
     main()

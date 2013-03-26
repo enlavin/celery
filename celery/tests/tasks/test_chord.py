@@ -1,5 +1,4 @@
 from __future__ import absolute_import
-from __future__ import with_statement
 
 from mock import patch
 from contextlib import contextmanager
@@ -7,7 +6,8 @@ from contextlib import contextmanager
 from celery import canvas
 from celery import current_app
 from celery import result
-from celery.result import AsyncResult, TaskSetResult
+from celery.five import range
+from celery.result import AsyncResult, GroupResult
 from celery.task import task, TaskSet
 from celery.tests.utils import AppCase, Mock
 
@@ -24,7 +24,7 @@ def callback(r):
     return r
 
 
-class TSR(TaskSetResult):
+class TSR(GroupResult):
     is_ready = True
     value = None
 
@@ -40,63 +40,67 @@ class TSR(TaskSetResult):
 
 @contextmanager
 def patch_unlock_retry():
-    unlock = current_app.tasks["celery.chord_unlock"]
+    unlock = current_app.tasks['celery.chord_unlock']
     retry = Mock()
     prev, unlock.retry = unlock.retry, retry
-    yield unlock, retry
-    unlock.retry = prev
+    try:
+        yield unlock, retry
+    finally:
+        unlock.retry = prev
 
 
 class test_unlock_chord_task(AppCase):
 
-    @patch("celery.result.TaskSetResult")
-    def test_unlock_ready(self, TaskSetResult):
+    @patch('celery.result.GroupResult')
+    def test_unlock_ready(self, GroupResult):
 
         class AlwaysReady(TSR):
             is_ready = True
             value = [2, 4, 8, 6]
 
-        @task
+        @task()
         def callback(*args, **kwargs):
             pass
 
-        pts, result.TaskSetResult = result.TaskSetResult, AlwaysReady
+        pts, result.GroupResult = result.GroupResult, AlwaysReady
         callback.apply_async = Mock()
         callback_s = callback.s()
         try:
             with patch_unlock_retry() as (unlock, retry):
                 subtask, canvas.maybe_subtask = canvas.maybe_subtask, passthru
                 try:
-                    unlock("setid", callback_s,
-                           result=map(AsyncResult, [1, 2, 3]))
+                    unlock('group_id', callback_s,
+                           result=[AsyncResult(r) for r in ['1', 2, 3]],
+                           GroupResult=AlwaysReady)
                 finally:
                     canvas.maybe_subtask = subtask
                 callback.apply_async.assert_called_with(([2, 4, 8, 6], ), {})
                 # did not retry
                 self.assertFalse(retry.call_count)
         finally:
-            result.TaskSetResult = pts
+            result.GroupResult = pts
 
-    @patch("celery.result.TaskSetResult")
-    def test_when_not_ready(self, TaskSetResult):
+    @patch('celery.result.GroupResult')
+    def test_when_not_ready(self, GroupResult):
         with patch_unlock_retry() as (unlock, retry):
 
             class NeverReady(TSR):
                 is_ready = False
 
-            pts, result.TaskSetResult = result.TaskSetResult, NeverReady
+            pts, result.GroupResult = result.GroupResult, NeverReady
             try:
                 callback = Mock()
-                unlock("setid", callback, interval=10, max_retries=30,
-                            result=map(AsyncResult, [1, 2, 3]))
+                unlock('group_id', callback, interval=10, max_retries=30,
+                       result=[AsyncResult(x) for x in ['1', '2', '3']],
+                       GroupResult=NeverReady)
                 self.assertFalse(callback.delay.call_count)
                 # did retry
                 unlock.retry.assert_called_with(countdown=10, max_retries=30)
             finally:
-                result.TaskSetResult = pts
+                result.GroupResult = pts
 
     def test_is_in_registry(self):
-        self.assertIn("celery.chord_unlock", current_app.tasks)
+        self.assertIn('celery.chord_unlock', current_app.tasks)
 
 
 class test_chord(AppCase):
@@ -104,20 +108,20 @@ class test_chord(AppCase):
     def test_eager(self):
         from celery import chord
 
-        @task
+        @task()
         def addX(x, y):
             return x + y
 
-        @task
+        @task()
         def sumX(n):
             return sum(n)
 
         self.app.conf.CELERY_ALWAYS_EAGER = True
         try:
-            x = chord(addX.s(i, i) for i in xrange(10))
+            x = chord(addX.s(i, i) for i in range(10))
             body = sumX.s()
             result = x(body)
-            self.assertEqual(result.get(), sum(i + i for i in xrange(10)))
+            self.assertEqual(result.get(), sum(i + i for i in range(10)))
         finally:
             self.app.conf.CELERY_ALWAYS_EAGER = False
 
@@ -130,10 +134,13 @@ class test_chord(AppCase):
         m.AsyncResult = AsyncResult
         prev, chord.Chord = chord.Chord, m
         try:
-            x = chord(add.s(i, i) for i in xrange(10))
+            x = chord(add.s(i, i) for i in range(10))
             body = add.s(2)
             result = x(body)
-            self.assertEqual(result.id, body.options["task_id"])
+            self.assertTrue(result.id)
+            # does not modify original subtask
+            with self.assertRaises(KeyError):
+                body.options['task_id']
             self.assertTrue(chord.Chord.called)
         finally:
             chord.Chord = prev
@@ -144,13 +151,13 @@ class test_Chord_task(AppCase):
     def test_run(self):
         prev, current_app.backend = current_app.backend, Mock()
         current_app.backend.cleanup = Mock()
-        current_app.backend.cleanup.__name__ = "cleanup"
+        current_app.backend.cleanup.__name__ = 'cleanup'
         try:
-            Chord = current_app.tasks["celery.chord"]
+            Chord = current_app.tasks['celery.chord']
 
             body = dict()
-            Chord(TaskSet(add.subtask((i, i)) for i in xrange(5)), body)
-            Chord([add.subtask((i, i)) for i in xrange(5)], body)
+            Chord(TaskSet(add.subtask((i, i)) for i in range(5)), body)
+            Chord([add.subtask((i, i)) for i in range(5)], body)
             self.assertEqual(current_app.backend.on_chord_apply.call_count, 2)
         finally:
             current_app.backend = prev
